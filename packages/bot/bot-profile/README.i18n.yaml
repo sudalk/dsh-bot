@@ -1,0 +1,46 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/bot/bot-profile/README.md
+/:
+  en: 97aaa907d2d59e40
+  zh: 167f42f94718c573
+/deepseek-ai-dsh-bot-profile:
+  en: 31d298e6512c4cc3
+  zh: 30864fcb951c809f
+/deepseek-ai-dsh-bot-profile/summary:
+  en: e6e6789c1d458018
+  zh: 458b78104a433083
+/deepseek-ai-dsh-bot-profile/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: a17ed76803619021
+/deepseek-ai-dsh-bot-profile/use-this-package:
+  en: 288ab5a93900306e
+  zh: 902e7364b67ace11
+/deepseek-ai-dsh-bot-profile/understand-the-implementation:
+  en: e3141c5091550774
+  zh: ff4423d8d12a49b9
+/deepseek-ai-dsh-bot-profile/further-exploration:
+  en: 58f13bc2740bf119
+  zh: 9ee74fec5adc84ba
+/deepseek-ai-dsh-bot-profile/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-bot-profile/model-experience/bot-identity-handoff-and-room-frames:
+  en: d7e32a0653f77e90
+  zh: 18ab66dcd8d75884
+/deepseek-ai-dsh-bot-profile/model-experience/bot-identity-handoff-and-room-frames/what-the-model-sees:
+  en: 9d5beaadec3c05c1
+  zh: d6ad223819f31a50
+/deepseek-ai-dsh-bot-profile/model-experience/bot-identity-handoff-and-room-frames/token-effect:
+  en: 5eaf46df85dda2d4
+  zh: 22522737c3a661b1
+/deepseek-ai-dsh-bot-profile/model-experience/bot-identity-handoff-and-room-frames/kv-cache-effect:
+  en: a9d701ed5b8836c0
+  zh: 05aa2193e05d0300
+/deepseek-ai-dsh-bot-profile/known-limitations-and-deferred-work:
+  en: 4092ee1fedab3927
+  zh: 7e1e982cdfe9e93a
+/deepseek-ai-dsh-bot-profile/known-limitations-and-deferred-work/dev-note:
+  en: 0225ba087c5266f3
+  zh: 0400e21a2683a23c

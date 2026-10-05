@@ -1,0 +1,18 @@
+# Bot Teammates over the shipped Web composition, which carries none of these
+# rows. `bot` owns the durable roster and each Bot's continuing conversation;
+# `bot-room` owns group chats with their message log and delivery; `bot-controller`
+# exposes the Remote namespace the panel reads; `ui-bot` is the Bots panel with
+# its per-Bot chat and info drawer.
+
+- insert:
+    - id: bot
+      name: '@deepseek-ai/dsh-bot'
+
+    - id: bot-room
+      name: '@deepseek-ai/dsh-bot-room'
+
+    - id: bot-controller
+      name: '@deepseek-ai/dsh-api-bot-controller'
+
+    - id: ui-bot
+      name: '@deepseek-ai/dsh-client-ui-bot'

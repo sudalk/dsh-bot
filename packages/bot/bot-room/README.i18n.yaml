@@ -1,0 +1,58 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/bot/bot-room/README.md
+/:
+  en: 2c4793cafeecc45d
+  zh: 15ece0dc50bf1d90
+/deepseek-ai-dsh-bot-room:
+  en: 57c58742e4e5f471
+  zh: aca9224b7b5029eb
+/deepseek-ai-dsh-bot-room/summary:
+  en: cff5ab988d3f9b5f
+  zh: ec261ad2dc1da96a
+/deepseek-ai-dsh-bot-room/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: d152484eb41ac6b4
+/deepseek-ai-dsh-bot-room/use-this-package:
+  en: 147caf537f3139dd
+  zh: b258609684636f03
+/deepseek-ai-dsh-bot-room/use-this-package/when-to-use-it:
+  en: 98609378dbfba24e
+  zh: 2915681aef368b60
+/deepseek-ai-dsh-bot-room/use-this-package/setting-up:
+  en: 233f3fa47f6aa108
+  zh: 816f7bfad035f042
+/deepseek-ai-dsh-bot-room/use-this-package/running-a-room:
+  en: d9ded3cde2dc4be6
+  zh: c877456c204f7897
+/deepseek-ai-dsh-bot-room/understand-the-implementation:
+  en: 4dd5c3278baeb73e
+  zh: eb8559023985d7c5
+/deepseek-ai-dsh-bot-room/understand-the-implementation/source-map:
+  en: 32c76e184e0d2941
+  zh: 82bce977a3a4a2ba
+/deepseek-ai-dsh-bot-room/further-exploration:
+  en: ad156e63f647c0d6
+  zh: bd4df82d992b5bfd
+/deepseek-ai-dsh-bot-room/model-experience:
+  en: 215e7ba838619b7b
+  zh: 215e7ba838619b7b
+/deepseek-ai-dsh-bot-room/model-experience/room-message-delivery:
+  en: d82d360acb27a78d
+  zh: 7d14de15036b0bda
+/deepseek-ai-dsh-bot-room/model-experience/room-message-delivery/what-the-model-sees:
+  en: d54c35aa2586de07
+  zh: ba23d53b7bd37611
+/deepseek-ai-dsh-bot-room/model-experience/room-message-delivery/token-effect:
+  en: 1363b7f5b258f2f8
+  zh: bb39741d7ff9da0e
+/deepseek-ai-dsh-bot-room/model-experience/room-message-delivery/kv-cache-effect:
+  en: e0df0ac9207a588e
+  zh: c8e249c32a587868
+/deepseek-ai-dsh-bot-room/known-limitations-and-deferred-work:
+  en: 6534e7e444dd5640
+  zh: c793ac8fafdc020d
+/deepseek-ai-dsh-bot-room/known-limitations-and-deferred-work/dev-note:
+  en: e67f633dc6fe7773
+  zh: e67f633dc6fe7773

@@ -1,0 +1,389 @@
+/* Backdrop dims the conversation just enough to read as a modal layer while
+   still letting the chat show through, the way chat apps present info panels. */
+.backdrop {
+  position: absolute;
+  inset: 0;
+  /* The chat's sticky composer sits at z-index 7; the drawer must outrank it
+     or the composer swallows clicks on the drawer's lower controls. */
+  z-index: 29;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent);
+}
+
+.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-width: 86%;
+  border-left: 1px solid var(--dsw-alias-line-divider);
+  background: var(--dsw-alias-bg-base);
+  box-shadow: -8px 0 24px color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: none;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--dsw-alias-line-divider);
+}
+
+.title {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+
+.close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  background: none;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+  scrollbar-gutter: stable;
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent);
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+/* The identity avatar doubles as the upload trigger, the way profile pages
+   treat the picture itself as the edit affordance. */
+.avatarButton {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: none;
+  cursor: pointer;
+}
+
+.avatarButton .avatar {
+  width: 100%;
+  height: 100%;
+}
+
+.avatarImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+  object-fit: cover;
+}
+
+.fileInput {
+  display: none;
+}
+
+.avatarActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.identityMain {
+  min-width: 0;
+}
+
+.identityName {
+  margin: 0;
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.identityMeta {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.label {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.fieldRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fieldRowEnd {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.select {
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.select:focus {
+  border-color: var(--dsh-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline: none;
+}
+
+.note {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  resize: vertical;
+}
+
+.textarea:focus {
+  border-color: var(--dsh-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline: none;
+}
+
+.hint {
+  margin: 0;
+  color: var(--dsw-alias-state-success-primary, var(--dsw-alias-state-business-primary));
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.error {
+  margin: 0;
+  color: var(--dsw-alias-state-error-primary, #d9534f);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.memberGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 10px;
+}
+
+.memberTile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 64px;
+}
+
+.memberAvatar {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.memberAvatarImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  object-fit: cover;
+}
+
+.memberName {
+  max-width: 64px;
+  overflow: hidden;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memberRemove {
+  position: absolute;
+  top: -4px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--dsw-alias-line-divider);
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.memberRemove:hover:not(:disabled) {
+  border-color: var(--dsw-alias-state-error-primary, #d9534f);
+  color: var(--dsw-alias-state-error-primary, #d9534f);
+}
+
+.memberRemove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.addTile {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-top: 0;
+  border: 1px dashed var(--dsw-alias-border-l4);
+  border-radius: 12px;
+  background: none;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.addTile:hover {
+  border-color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.addList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-fill-solid-secondary);
+  list-style: none;
+}
+
+.addRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.addName {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.addEmpty {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}
+
+/* Pinned to the drawer's bottom edge: the destructive action must stay
+   reachable no matter how tall the profile form grows or how far it scrolls. */
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: none;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--dsw-alias-line-divider);
+  background: var(--dsw-alias-bg-base);
+}
+
+.danger {
+  color: var(--dsw-alias-state-error-primary, #d9534f);
+}
+
+.dangerSolid {
+  background: var(--dsw-alias-state-error-primary, #d9534f);
+}
+
+.confirmRow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--dsw-radius-lg);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d9534f) 8%, transparent);
+}
+
+.confirmText {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.confirmActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
