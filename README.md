@@ -16,6 +16,12 @@
 
 每个包的 README 有各自的使用说明、Model Experience 与已知边界（中英双语）。
 
+## 安装 / Install
+
+本仓库不能独立安装：5 个包以 `workspace:*` 依赖 harness 核心包，需集成进 deepseek-harness 检出（基线 `0.2.0-rc.1`）。完整步骤——放入包、按域拆分的 7 张补丁（3 张必打 / 4 张可选，各自标注缺失后果）、profile 接线、构建验证与已知边界——见 [INSTALL.md](INSTALL.md)，补丁本体在 [`patches/`](patches/)。
+
+*Not independently installable: integrate into a deepseek-harness checkout. See [INSTALL.md](INSTALL.md) for the domain-split patch set (3 required / 4 optional), profile wiring, and verification steps.*
+
 ## 状态 / Status
 
 从 deepseek-harness 工作区抽出（版本 `0.2.0-rc.1`），目录结构保持与其 monorepo 一致；各包以 `workspace:*` 声明对 harness 核心包的依赖，因此用于在 deepseek-harness 检出中构建与运行，暂不独立成构建单元。

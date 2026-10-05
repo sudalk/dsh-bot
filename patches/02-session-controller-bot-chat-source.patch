@@ -1,0 +1,13 @@
+diff --git a/packages/api/session-controller/src/client/index.ts b/packages/api/session-controller/src/client/index.ts
+index b9600f36a6..7e750f2389 100644
+--- a/packages/api/session-controller/src/client/index.ts
++++ b/packages/api/session-controller/src/client/index.ts
+@@ -80,6 +80,8 @@ export type {
+ export interface SessionReferenceSourceMap {
+   /** Temporary Client Controller work, including fork-title preparation. */
+   controllerOperation: unknown
++  /** Bot roster session creation and initial prompt admission. */
++  botChat: unknown
+   /** A Client Gateway invocation's synchronous Context ownership. */
+   gateway: unknown
+ }

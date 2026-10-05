@@ -1,0 +1,721 @@
+diff --git a/packages/client/ui-chat/src/client/apply.ts b/packages/client/ui-chat/src/client/apply.ts
+index 15752f6c70..79e3ef5384 100644
+--- a/packages/client/ui-chat/src/client/apply.ts
++++ b/packages/client/ui-chat/src/client/apply.ts
+@@ -29,14 +29,15 @@ import { EMPTY_CHAT_SNAPSHOT } from './contract/snapshot.ts'
+ import { ApprovalCommand } from './chat/ApprovalCommand.tsx'
+ import { ChatView } from './chat/ChatView.tsx'
+ import { registerChatNodeRenderers } from './chat/register-node-renderers.ts'
+-import { StatsPills } from './chat/StatsPills.tsx'
++import { StatsPillsSeat } from './chat/StatsPills.tsx'
+ import { registerConversationNodes } from './conversation-nodes/register.ts'
+ import { QuotaNoticeHost } from './chat/QuotaNoticeHost.tsx'
+ import { en, NS, zh } from './locale.ts'
+ import { TranscriptViewRow, type TranscriptViewRowInjected } from './settings/TranscriptViewRow.tsx'
+ import { createChatStore } from './stores.ts'
+ import { TranscriptViewPolicy } from './transcript-view.ts'
+-import { derivePresentationPolicy } from './presentation-policy.ts'
++import { derivePresentationPolicy, type ChatPresentationPolicy } from './presentation-policy.ts'
++import { ChatTranscriptOverrides } from './presentation-overrides.ts'
+ import { CHAT_SETTINGS_NAMESPACE, DEFAULT_LINK_OPENING, DEFAULT_TRANSCRIPT_VIEW_MODE, type ChatSettings } from '../chat-settings.ts'
+ import { LinkOpeningRow, type LinkOpeningRowInjected } from './settings/LinkOpeningRow.tsx'
+ import { PerformanceUsageRow, type PerformanceUsageRowInjected } from './settings/PerformanceUsageRow.tsx'
+@@ -148,10 +149,22 @@ export function apply(ctx: Context): void {
+   })
+   const transcriptView = new TranscriptViewPolicy(chatSettings, 'dshDesktop' in globalThis ? 'standard' : DEFAULT_TRANSCRIPT_VIEW_MODE)
+   const presentation = derivePresentationPolicy(transcriptView.mode)
++  const transcriptOverrides = new ChatTranscriptOverrides()
++  /**
++   * Resolve one Session's presentation: the deployment policy with that
++   * Session's product override folded over it. Every per-Session seat — the
++   * View, the keyed Node renderers, and the composer-dock statistics — binds
++   * through this, so one override reaches all of them and ordinary Sessions
++   * keep the deployment-wide mode.
++   */
++  const presentationFor = (sessionId: SessionId): ObservableSnapshot<ChatPresentationPolicy> =>
++    transcriptOverrides.for(sessionId, presentation)
++  const disposeTranscript = ctx.reflect.provide('chatTranscript', transcriptOverrides)
++  ctx.effect(() => () => { void disposeTranscript() }, 'ui-chat: transcript overrides')
+   const performancePolicy = new PerformanceUsagePolicy(chatSettings)
+   ctx.effect(() => () => { transcriptView.dispose(); performancePolicy.dispose() })
+   const performanceUsage = performancePolicy.mode
+-  registerChatNodeRenderers(ctx, performanceUsage, presentation)
++  registerChatNodeRenderers(ctx, performanceUsage, presentationFor)
+ 
+   ctx.slots.inject('settings.general.item', () => ctx.slots.register({
+     name: 'settings.general.item',
+@@ -194,7 +207,7 @@ export function apply(ctx: Context): void {
+         const chat = chatSource(binding)
+         const conversation = ctx.uiConversation.binding(binding)
+         return {
+-          hooks: { presentation },
++          hooks: { presentation: transcriptOverrides.for(sessionId, presentation) },
+           keyedHooks: {
+             chatNode: key => chat.getSnapshot().nodes.source(key),
+             chatNodeProcess: key => chat.getSnapshot().nodes.processSource(key),
+@@ -284,8 +297,10 @@ export function apply(ctx: Context): void {
+   ctx.slots.inject('conversation.composer.dock', () =>
+     ctx.slots.register({
+       name: 'conversation.composer.dock', id: 'stats', order: 0, locale: NS,
+-      inject: () => ({ hooks: { performanceUsage } }),
+-    }, StatsPills))
++      inject: (sessionId: SessionId) => ({
++        hooks: { performanceUsage, presentation: presentationFor(sessionId) },
++      }),
++    }, StatsPillsSeat))
+ 
+   ctx.slots.inject('conversation.approval.detail', () =>
+     ctx.slots.register({ name: 'conversation.approval.detail' }, ApprovalCommand))
+diff --git a/packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx b/packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx
+index 5d97a698f7..a38a17350f 100644
+--- a/packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx
++++ b/packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx
+@@ -66,9 +66,10 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
+   // Tool-call heads render as tool rows in the chat view's grouping pass, so
+   // a node that is only those heads (or empty) would paint an empty root
+   // between tool groups — skip the shell unless something visible remains.
++  const hideReasoning = usePresentation(policy => policy.hideReasoning)
+   const hasVisible = streaming
+     || interrupted === true
+-    || blocks.some(block => block.kind !== 'tool-call')
++    || blocks.some(block => block.kind !== 'tool-call' && !(hideReasoning && block.kind === 'reasoning'))
+   if (!hasVisible) return null
+   const rendered: ReactNode[] = []
+   for (let i = 0; i < blocks.length; i++) {
+@@ -93,8 +94,8 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
+         rendered.push(
+           <ProcessReasoning
+             key={i}
+-            hidden={reasoningHidden}
+-            reveal={revealProcess}
++            hidden={reasoningHidden || hideReasoning}
++            reveal={hideReasoning ? undefined : revealProcess}
+           >
+             <ReasoningRow text={block.text} running={streaming && i === last} usePresentation={usePresentation}
+               useDisclosure={useDisclosure} t={t} />
+diff --git a/packages/client/ui-chat/src/client/chat/ChatNodeSeat.tsx b/packages/client/ui-chat/src/client/chat/ChatNodeSeat.tsx
+index f2269daf9d..f43fe3f2d4 100644
+--- a/packages/client/ui-chat/src/client/chat/ChatNodeSeat.tsx
++++ b/packages/client/ui-chat/src/client/chat/ChatNodeSeat.tsx
+@@ -69,6 +69,7 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
+     }
+   }, [actions, processSpec, alwaysOpen])
+   const foldCompleted = usePresentation(policy => policy.foldCompletedTurns)
++  const hideTurnProcess = usePresentation(policy => policy.hideTurnProcess)
+   // A loaded end makes a partial historical Turn eligible without its start.
+   const processWindowReady = processSpec !== undefined
+     && processPresentation !== undefined
+@@ -138,6 +139,9 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
+     loadImage, renderMessageImages, fileMentions, turnProcess,
+   ])
+   if (routedNode === undefined || owner === null) return null
++  // The Turn process controller is a work-report row; a chat-processed
++  // Session drops it whole, so its own wrapper carries no anchor either.
++  if (routedNode.kind === 'turn-process' && hideTurnProcess) return null
+   // Runtime dispatch owns the correlation: every Node's discriminant is the
+   // keyed-slot entry passed alongside that same Node. TypeScript does not
+   // distribute an object containing a union into a union of objects itself.
+diff --git a/packages/client/ui-chat/src/client/chat/StatsPills.tsx b/packages/client/ui-chat/src/client/chat/StatsPills.tsx
+index e7ba095dd9..ecbc225208 100644
+--- a/packages/client/ui-chat/src/client/chat/StatsPills.tsx
++++ b/packages/client/ui-chat/src/client/chat/StatsPills.tsx
+@@ -12,7 +12,7 @@ import type { InjectFace, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-u
+ // Type-only: merges the sessionStats key into SessionProjectionMap for useProjection.
+ import type {} from '@deepseek-ai/dsh-session-stats/client'
+ import type { TokenUsageProjection } from '@deepseek-ai/dsh-token-meter/client'
+-import type { ChatViewSlotProps, PerformanceUsageInjected } from '../contract/slots.ts'
++import type { ChatViewSlotProps, PerformanceUsageInjected, PresentationInjected } from '../contract/slots.ts'
+ import type { ChatSnapshot } from '../contract/snapshot.ts'
+ import { formatTokensPerSecond } from './message-chrome.ts'
+ import { assistantStepReading } from '../contract/turn-metrics.ts'
+@@ -370,3 +370,14 @@ export const StatsPills = memo(function StatsPills({ useChat, useProjection, use
+     </div>
+   )
+ })
++
++/**
++ * The composer-dock seat for {@link StatsPills}: the dock asks this wrapper so
++ * a conversation the product presents as chat drops the statistics row while
++ * the pills component itself stays a pure reading of the snapshot.
++ */
++export const StatsPillsSeat = memo(function StatsPillsSeat({
++  usePresentation, ...props
++}: StatsPillsProps & InjectFace<PresentationInjected>) {
++  return usePresentation(policy => policy.hideSessionStats) ? null : <StatsPills {...props} />
++})
+diff --git a/packages/client/ui-chat/src/client/chat/TurnTailNodeView.tsx b/packages/client/ui-chat/src/client/chat/TurnTailNodeView.tsx
+index a3d58a8cfe..ddac53fc91 100644
+--- a/packages/client/ui-chat/src/client/chat/TurnTailNodeView.tsx
++++ b/packages/client/ui-chat/src/client/chat/TurnTailNodeView.tsx
+@@ -1,6 +1,8 @@
+ import { memo } from 'react'
+ import type { InjectFace, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
+-import type { ChatNodeViewProps, PerformanceUsageInjected, TurnTailOwnerProps } from '../contract/slots.ts'
++import type {
++  ChatNodeViewProps, PerformanceUsageInjected, PresentationInjected, TurnTailOwnerProps,
++} from '../contract/slots.ts'
+ import { MessageIconActions } from './MessageIconActions.tsx'
+ import { TurnUsagePanel } from './TurnUsagePanel.tsx'
+ import { assistantText } from './turn-assistant.ts'
+@@ -11,7 +13,7 @@ import css from './TurnTailNodeView.module.css'
+ 
+ type TurnTailNodeViewProps = ChatNodeViewProps<'turn-tail'>
+   & PropsRenderSlots<'conversation.chat.turnTail' | 'conversation.chat.assistant-actions'>
+-  & InjectFace<PerformanceUsageInjected>
++  & InjectFace<PerformanceUsageInjected & PresentationInjected>
+ 
+ function lastContent(snapshot: ChatSnapshot, turn: number, skipWarning: boolean): ChatNode | undefined {
+   const keys = snapshot.locations.getTurn(turn)
+@@ -26,9 +28,10 @@ function lastContent(snapshot: ChatSnapshot, turn: number, skipWarning: boolean)
+ 
+ /** Turn-local actions and feature tail over the Location index, independent of Assistant placement. */
+ export const TurnTailNodeView = memo(function TurnTailNodeView({
+-  node, openFile, forkAt, renderSlot, t, useChat, usePerformanceUsage,
++  node, openFile, forkAt, renderSlot, t, useChat, usePerformanceUsage, usePresentation,
+ }: TurnTailNodeViewProps) {
+   const detailed = usePerformanceUsage(mode => mode) === 'detailed'
++  const hideUsage = usePresentation(policy => policy.hideTurnUsage)
+   const data = node.data
+   const hasLaterChatNode = useChat(snapshot =>
+     (lastContent(snapshot, data.turn, true)?.anchorSeq ?? -1) > (data.closing?.finalNode.seq ?? data.seq))
+@@ -70,7 +73,7 @@ export const TurnTailNodeView = memo(function TurnTailNodeView({
+         branchUnavailable={data.branchUnavailable || hasLaterChatNode}
+         className={css.actions}
+         extraActions={assistantActions}
+-        usageAction={detailed && data.tokenUsage !== undefined
++        usageAction={!hideUsage && detailed && data.tokenUsage !== undefined
+           ? <TurnUsagePanel usage={data.tokenUsage} t={t} />
+           : null}
+         t={t}
+diff --git a/packages/client/ui-chat/src/client/chat/TurnTriggerNodeView.tsx b/packages/client/ui-chat/src/client/chat/TurnTriggerNodeView.tsx
+index afa2106ca9..3a5a6d2be7 100644
+--- a/packages/client/ui-chat/src/client/chat/TurnTriggerNodeView.tsx
++++ b/packages/client/ui-chat/src/client/chat/TurnTriggerNodeView.tsx
+@@ -37,7 +37,7 @@ export function TurnTriggerNodeView({ node, t }: Pick<ChatNodeViewProps<'turn-tr
+     <section className={css.root} data-turn-trigger>
+       <button className={css.header} type="button" aria-expanded={open} aria-controls={bodyId} onClick={() => { setOpen(!open) }}>
+         <span className={css.icon} aria-hidden><TriggerIcon size={14} /></span>
+-        <span className={css.title}>{t(details.title)}</span>
++        <span className={css.title}>{t(details.title, details.params)}</span>
+         <time className={css.time} dateTime={date.toISOString()}>{time}</time>
+         <IconChevronDownOutlineRegular size={12} className={open ? css.openChevron : css.chevron} />
+       </button>
+diff --git a/packages/client/ui-chat/src/client/chat/register-node-renderers.ts b/packages/client/ui-chat/src/client/chat/register-node-renderers.ts
+index eec1a124c4..07de11211c 100644
+--- a/packages/client/ui-chat/src/client/chat/register-node-renderers.ts
++++ b/packages/client/ui-chat/src/client/chat/register-node-renderers.ts
+@@ -1,5 +1,6 @@
+ import type { Context } from '@deepseek-ai/cordis'
+ import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
++import type { SessionId } from '@deepseek-ai/dsh-session/types'
+ import type { PerformanceUsageMode } from '../../chat-settings.ts'
+ import type { ChatPresentationPolicy } from '../presentation-policy.ts'
+ import { NS } from '../locale.ts'
+@@ -17,15 +18,16 @@ import { TurnTriggerNodeView } from './TurnTriggerNodeView.tsx'
+ /**
+  * Register this package's business renderers behind the keyed Chat Node seat.
+  * Renderers whose output depends on the work-details mode receive the policy
+- * through their own registration; the seat and the other renderers do not.
++ * through their own registration, resolved per Session so a product override
++ * reaches them; the seat and the other renderers do not.
+  * @param ctx - owning UI Conversation context.
+  * @param performanceUsage - live statistics detail preference.
+- * @param presentation - live presentation policy.
++ * @param presentationFor - resolve one Session's override-folded presentation policy.
+  */
+ export function registerChatNodeRenderers(
+   ctx: Context,
+   performanceUsage: ObservableSnapshot<PerformanceUsageMode>,
+-  presentation: ObservableSnapshot<ChatPresentationPolicy>,
++  presentationFor: (sessionId: SessionId) => ObservableSnapshot<ChatPresentationPolicy>,
+ ): void {
+   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register(
+     { name: 'conversation.chat.node', key: 'user', locale: NS }, UserMessageNodeView))
+@@ -41,7 +43,7 @@ export function registerChatNodeRenderers(
+     name: 'conversation.chat.node',
+     key: 'assistant-step',
+     locale: NS,
+-    inject: () => ({ hooks: { presentation } }),
++    inject: (sessionId: SessionId) => ({ hooks: { presentation: presentationFor(sessionId) } }),
+   }, AssistantNodeView))
+   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
+     name: 'conversation.chat.node',
+@@ -65,7 +67,9 @@ export function registerChatNodeRenderers(
+     name: 'conversation.chat.node',
+     key: 'turn-tail',
+     locale: NS,
+-    inject: () => ({ hooks: { performanceUsage } }),
++    inject: (sessionId: SessionId) => ({
++      hooks: { performanceUsage, presentation: presentationFor(sessionId) },
++    }),
+     children: {
+       'conversation.chat.turnTail': { kind: 'list', scope: 'session' },
+       'conversation.chat.assistant-actions': { kind: 'list', scope: 'session' },
+diff --git a/packages/client/ui-chat/src/client/chat/turn-trigger.ts b/packages/client/ui-chat/src/client/chat/turn-trigger.ts
+index 0e560572e2..77f61f8788 100644
+--- a/packages/client/ui-chat/src/client/chat/turn-trigger.ts
++++ b/packages/client/ui-chat/src/client/chat/turn-trigger.ts
+@@ -16,16 +16,18 @@ function field(source: Record<string, unknown>, key: string): string {
+ /**
+  * Describe a waking message using its source and recognized producer framing.
+  * @param node - durable context, including the original notification body.
+- * @returns localized title key and source-family icon.
++ * @returns localized title key, source-family icon, and template params.
+  */
+ export function turnTriggerDetails(node: ContextMessageNode): {
+   title: ChatKey
+   icon: TurnTriggerIcon
++  params?: Readonly<Record<string, string>>
+ } {
+   const source = record(node.source)
+   const kind = field(source, 'kind')
+   let title: ChatKey = 'message.trigger.request'
+   let icon: TurnTriggerIcon = 'request'
++  let params: Record<string, string> | undefined
+   switch (kind) {
+     case 'goal': {
+       title = 'message.trigger.goal'
+@@ -45,6 +47,36 @@ export function turnTriggerDetails(node: ContextMessageNode): {
+       icon = 'subagent'
+       break
+     }
++    case 'room-message': {
++      // Records written before rooms carried their name on the source fall
++      // back to the unnamed title instead of rendering an empty placeholder.
++      const roomName = field(source, 'roomName')
++      title = roomName === '' ? 'message.trigger.room' : 'message.trigger.roomNamed'
++      icon = 'team'
++      if (roomName !== '') params = { room: roomName }
++      break
++    }
++    case 'bot-handoff': {
++      title = 'message.trigger.handoff'
++      icon = 'agent'
++      const name = field(source, 'senderName')
++      if (name !== '') params = { name }
++      break
++    }
++    case 'bot-consult': {
++      title = 'message.trigger.consult'
++      icon = 'agent'
++      const name = field(source, 'senderName')
++      if (name !== '') params = { name }
++      break
++    }
++    case 'bot-consult-answer': {
++      title = 'message.trigger.consultAnswer'
++      icon = 'agent'
++      const name = field(source, 'senderName')
++      if (name !== '') params = { name }
++      break
++    }
+     case 'webhook': {
+       const github = field(source, 'provider') === 'github'
+       title = github ? 'message.trigger.github' : 'message.trigger.webhook'
+@@ -67,5 +99,5 @@ export function turnTriggerDetails(node: ContextMessageNode): {
+       // Custom sources remain visible without attributing unrecorded identity or success.
+       break
+   }
+-  return { title, icon }
++  return params === undefined ? { title, icon } : { title, icon, params }
+ }
+diff --git a/packages/client/ui-chat/src/client/contract/assistant-content.ts b/packages/client/ui-chat/src/client/contract/assistant-content.ts
+index 18beac1cbf..38500333fb 100644
+--- a/packages/client/ui-chat/src/client/contract/assistant-content.ts
++++ b/packages/client/ui-chat/src/client/contract/assistant-content.ts
+@@ -1,15 +1,31 @@
+ import type { AssistantBlock } from '@deepseek-ai/dsh-client-ui-conversation/client'
+ 
++/**
++ * A whole-reply protocol token in brackets, e.g. a room delivery's skip
++ * answer. Producers that ask for such an answer reserve the complete reply
++ * form for it, so a matching block is protocol material, never prose.
++ */
++const CONTROL_TOKEN = /^\[[a-z][a-z0-9_-]*\]$/i
++
++/**
++ * Test whether one text block is a bare control token instead of a reply.
++ * @param text - One Assistant text block's content.
++ * @returns whether the block carries no user-facing prose.
++ */
++export function isControlTokenText(text: string): boolean {
++  return CONTROL_TOKEN.test(text.trim())
++}
++
+ /**
+  * Test whether Assistant blocks contain a user-facing reply rather than only
+- * reasoning or Tool-call protocol material.
++ * reasoning, Tool-call protocol material, or a bare control token.
+  * @param blocks - Assistant content blocks.
+  * @returns whether the blocks contain visible reply content.
+  */
+ export function hasAssistantReplyContent(blocks: readonly AssistantBlock[]): boolean {
+   return blocks.some((block) => {
+     if (block.kind === 'reasoning' || block.kind === 'tool-call') return false
+-    if (block.kind === 'text') return block.text.trim() !== ''
++    if (block.kind === 'text') return block.text.trim() !== '' && !isControlTokenText(block.text)
+     return true
+   })
+ }
+diff --git a/packages/client/ui-chat/src/client/conversation-nodes/assistant.ts b/packages/client/ui-chat/src/client/conversation-nodes/assistant.ts
+index 53b8057c58..64bd7d951d 100644
+--- a/packages/client/ui-chat/src/client/conversation-nodes/assistant.ts
++++ b/packages/client/ui-chat/src/client/conversation-nodes/assistant.ts
+@@ -7,6 +7,7 @@ import type { StreamChunk } from '@deepseek-ai/dsh-llm'
+ import type {} from '@deepseek-ai/dsh-llm-retry/types'
+ import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
+ import type { AssistantChatData } from '../contract/chat-nodes.ts'
++import { isControlTokenText } from '../contract/assistant-content.ts'
+ import { CHAT_SYNTHETIC_SEQ_OFFSETS, chatNode } from './common.ts'
+ import {
+   emptyAssistantBlock, isTokenDelta, toAssistantBlock, toAssistantBlocks,
+@@ -58,7 +59,9 @@ function compactBlocks(blocks: readonly (AssistantBlock | undefined)[]): Assista
+ 
+ function blockIsVisible(block: AssistantBlock | undefined): boolean {
+   if (block === undefined || block.kind === 'tool-call') return false
+-  if (block.kind === 'text' || block.kind === 'reasoning') return block.text.trim() !== ''
++  if (block.kind === 'text' || block.kind === 'reasoning') {
++    return block.text.trim() !== '' && !(block.kind === 'text' && isControlTokenText(block.text))
++  }
+   return true
+ }
+ 
+diff --git a/packages/client/ui-chat/src/client/locale.ts b/packages/client/ui-chat/src/client/locale.ts
+index dbec14300e..f1ac26d630 100644
+--- a/packages/client/ui-chat/src/client/locale.ts
++++ b/packages/client/ui-chat/src/client/locale.ts
+@@ -55,6 +55,11 @@ export const zh = {
+   'message.trigger.agent': '收到任务消息',
+   'message.trigger.team': '收到团队消息',
+   'message.trigger.subagent': '子任务状态更新',
++  'message.trigger.room': '来自群聊的消息',
++  'message.trigger.roomNamed': '来自群聊「{room}」的消息',
++  'message.trigger.handoff': '收到「{name}」的任务交接',
++  'message.trigger.consult': '收到「{name}」的咨询',
++  'message.trigger.consultAnswer': '「{name}」回复了你的咨询',
+   'message.trigger.github': '收到 GitHub 事件',
+   'message.trigger.webhook': '收到外部事件',
+   'message.trigger.schedule': '自动化任务',
+@@ -248,6 +253,11 @@ export const en = {
+   'message.trigger.agent': 'Task message received',
+   'message.trigger.team': 'Team message received',
+   'message.trigger.subagent': 'Subtask status updated',
++  'message.trigger.room': 'Message from a group chat',
++  'message.trigger.roomNamed': 'Message from group "{room}"',
++  'message.trigger.handoff': 'Task handed off by "{name}"',
++  'message.trigger.consult': 'Question from "{name}"',
++  'message.trigger.consultAnswer': '"{name}" answered your question',
+   'message.trigger.github': 'GitHub event received',
+   'message.trigger.webhook': 'External event received',
+   'message.trigger.schedule': 'Automation task',
+diff --git a/packages/client/ui-chat/src/client/presentation-overrides.ts b/packages/client/ui-chat/src/client/presentation-overrides.ts
+new file mode 100644
+index 0000000000..62d0905d75
+--- /dev/null
++++ b/packages/client/ui-chat/src/client/presentation-overrides.ts
+@@ -0,0 +1,117 @@
++/**
++ * Session-scoped transcript presentation overrides owned by the Chat target.
++ *
++ * The deployment-wide work-details mode stays the user's choice for ordinary
++ * Sessions. A conversation a product presents as chat — a Bot chat — can ask
++ * the Chat view for a quieter transcript instead, without touching what the
++ * user selected in Settings. Overrides are keyed by Session, and the derived
++ * policy keeps a stable identity per (Session, mode), so memoized renderers
++ * and selectors never churn.
++ * @module @deepseek-ai/dsh-client-ui-chat/src/client/presentation-overrides
++ */
++
++import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
++import type { SessionId } from '@deepseek-ai/dsh-session/types'
++import type { ChatPresentationPolicy } from './presentation-policy.ts'
++
++/** Presentation fields one product may adjust for its own conversation. */
++export interface ChatPresentationOverride {
++  /** Hide the model's reasoning rows for this conversation. */
++  readonly hideReasoning?: boolean
++  /** Hide the Turn process controller (worked label and elapsed time). */
++  readonly hideTurnProcess?: boolean
++  /** Hide the per-Turn usage pill. */
++  readonly hideTurnUsage?: boolean
++  /** Hide the composer-dock session statistics. */
++  readonly hideSessionStats?: boolean
++}
++
++/** Face other client packages use to quiet one Session's transcript. */
++export interface IChatTranscript {
++  /**
++   * Install or replace one Session's override.
++   * @param sessionId - conversation the override belongs to.
++   * @param override - presentation fields to change.
++   */
++  set(sessionId: SessionId, override: ChatPresentationOverride): void
++
++  /**
++   * Drop one Session's override, restoring the deployment policy.
++   * @param sessionId - conversation whose override is removed.
++   */
++  clear(sessionId: SessionId): void
++
++  /**
++   * Resolve the presentation one Session renders with.
++   * @param sessionId - conversation being rendered.
++   * @param base - the deployment policy observable the Session otherwise uses.
++   * @returns the base observable without an override, else a stable observable
++   * folding the override over each mode; it notifies exactly when the base does.
++   */
++  for(sessionId: SessionId, base: ObservableSnapshot<ChatPresentationPolicy>): ObservableSnapshot<ChatPresentationPolicy>
++}
++
++declare module '@deepseek-ai/cordis' {
++  interface Context {
++    /** Session-scoped transcript presentation overrides; absent without the Chat target. */
++    chatTranscript: IChatTranscript
++  }
++}
++
++/** One derived policy, remembered by the resolved mode it was folded from. */
++interface DerivedPolicy {
++  readonly mode: ChatPresentationPolicy
++  readonly value: ChatPresentationPolicy
++}
++
++/** One Session's wrapper observable over the deployment policy source. */
++interface SessionPolicySource extends ObservableSnapshot<ChatPresentationPolicy> {
++  readonly base: ObservableSnapshot<ChatPresentationPolicy>
++}
++
++/** The Chat target's override registry. */
++export class ChatTranscriptOverrides implements IChatTranscript {
++  private readonly overrides = new Map<SessionId, ChatPresentationOverride>()
++  private readonly derived = new Map<SessionId, DerivedPolicy>()
++  private readonly sources = new Map<SessionId, SessionPolicySource>()
++
++  set(sessionId: SessionId, override: ChatPresentationOverride): void {
++    this.overrides.set(sessionId, override)
++    this.derived.delete(sessionId)
++  }
++
++  clear(sessionId: SessionId): void {
++    if (this.overrides.delete(sessionId)) this.derived.delete(sessionId)
++  }
++
++  for(
++    sessionId: SessionId,
++    base: ObservableSnapshot<ChatPresentationPolicy>,
++  ): ObservableSnapshot<ChatPresentationPolicy> {
++    if (!this.overrides.has(sessionId)) {
++      this.sources.delete(sessionId)
++      return base
++    }
++    const existing = this.sources.get(sessionId)
++    if (existing !== undefined && existing.base === base) return existing
++    const source: SessionPolicySource = {
++      base,
++      getSnapshot: () => this.resolve(sessionId, base),
++      subscribe: listener => base.subscribe(listener),
++    }
++    this.sources.set(sessionId, source)
++    return source
++  }
++
++  /** Fold the current override over the base's current mode, memoized by mode identity. */
++  private resolve(sessionId: SessionId, base: ObservableSnapshot<ChatPresentationPolicy>): ChatPresentationPolicy {
++    const mode = base.getSnapshot()
++    const cached = this.derived.get(sessionId)
++    if (cached !== undefined && cached.mode === mode) return cached.value
++    const override = this.overrides.get(sessionId)
++    if (override === undefined) return mode
++    const value: ChatPresentationPolicy = { ...mode, ...override }
++    this.derived.set(sessionId, { mode, value })
++    return value
++  }
++}
+diff --git a/packages/client/ui-chat/src/client/presentation-policy.ts b/packages/client/ui-chat/src/client/presentation-policy.ts
+index 5b3ee1a7d5..873cbfeec4 100644
+--- a/packages/client/ui-chat/src/client/presentation-policy.ts
++++ b/packages/client/ui-chat/src/client/presentation-policy.ts
+@@ -19,6 +19,30 @@ export interface ChatPresentationPolicy {
+   readonly liveProcessDetail: boolean
+   /** Whether a settled reasoning row previews its first line beside the Think title. */
+   readonly settledReasoningPreview: boolean
++  /**
++   * Whether assistant reasoning rows render at all. True only through a
++   * Session-scoped override: a conversation the product presents as chat
++   * (a Bot chat) hides the model's thinking, which the deployment-wide modes
++   * keep available for ordinary sessions.
++   */
++  readonly hideReasoning: boolean
++  /**
++   * Whether the Turn process controller (the worked/elapsed label that unfolds
++   * one Turn's steps) renders at all. True only through a Session-scoped
++   * override: a chat shows replies, not a work report with duration.
++   */
++  readonly hideTurnProcess: boolean
++  /**
++   * Whether the per-Turn usage pill renders at all. True only through a
++   * Session-scoped override: token accounting is console chrome, not chat.
++   */
++  readonly hideTurnUsage: boolean
++  /**
++   * Whether the composer-dock session statistics render at all. True only
++   * through a Session-scoped override: the running wheel/step/token tally
++   * belongs to the work console.
++   */
++  readonly hideSessionStats: boolean
+ }
+ 
+ const POLICIES: Readonly<Record<TranscriptViewMode, ChatPresentationPolicy>> = {
+@@ -28,6 +52,10 @@ const POLICIES: Readonly<Record<TranscriptViewMode, ChatPresentationPolicy>> = {
+     stepGrouping: 'collapsed',
+     liveProcessDetail: false,
+     settledReasoningPreview: false,
++    hideReasoning: false,
++    hideTurnProcess: false,
++    hideTurnUsage: false,
++    hideSessionStats: false,
+   },
+   standard: {
+     mode: 'standard',
+@@ -35,6 +63,10 @@ const POLICIES: Readonly<Record<TranscriptViewMode, ChatPresentationPolicy>> = {
+     stepGrouping: 'collapsed',
+     liveProcessDetail: true,
+     settledReasoningPreview: true,
++    hideReasoning: false,
++    hideTurnProcess: false,
++    hideTurnUsage: false,
++    hideSessionStats: false,
+   },
+   detailed: {
+     mode: 'detailed',
+@@ -42,6 +74,10 @@ const POLICIES: Readonly<Record<TranscriptViewMode, ChatPresentationPolicy>> = {
+     stepGrouping: 'history',
+     liveProcessDetail: true,
+     settledReasoningPreview: true,
++    hideReasoning: false,
++    hideTurnProcess: false,
++    hideTurnUsage: false,
++    hideSessionStats: false,
+   },
+   verbose: {
+     mode: 'verbose',
+@@ -49,6 +85,10 @@ const POLICIES: Readonly<Record<TranscriptViewMode, ChatPresentationPolicy>> = {
+     stepGrouping: 'none',
+     liveProcessDetail: false,
+     settledReasoningPreview: true,
++    hideReasoning: false,
++    hideTurnProcess: false,
++    hideTurnUsage: false,
++    hideSessionStats: false,
+   },
+ }
+ 
+diff --git a/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts b/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts
+index f948d14450..afcdee3931 100644
+--- a/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts
++++ b/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts
+@@ -15,7 +15,7 @@ import { inspectSystemPrompt } from '../../ui-conversation/src/client/contract/s
+ import { AssistantStreamAccumulator } from '@deepseek-ai/dsh-llm/assistant-stream'
+ import { LlmAttemptId } from '@deepseek-ai/dsh-llm/brand'
+ import type { StreamChunk } from '@deepseek-ai/dsh-llm'
+-import { hasAssistantReplyContent } from '../src/client/contract/assistant-content.ts'
++import { hasAssistantReplyContent, isControlTokenText } from '../src/client/contract/assistant-content.ts'
+ import { assistantDefinition } from '../src/client/conversation-nodes/assistant.ts'
+ import { chatViewDefinition } from '../src/client/conversation-nodes/chat-snapshot-builder.ts'
+ import { commandDefinition } from '../src/client/conversation-nodes/command.ts'
+@@ -367,6 +367,19 @@ describe('built-in conversation node Definitions', () => {
+     expect(hasAssistantReplyContent([{ kind: 'other', block: { type: 'future' } }])).toBe(true)
+   })
+ 
++  it('treats a bare control token as protocol material, not a reply', () => {
++    expect(isControlTokenText('[skip]')).toBe(true)
++    expect(isControlTokenText('  [SKIP]\n')).toBe(true)
++    expect(isControlTokenText('[skip] 不需要我参与')).toBe(false)
++    expect(isControlTokenText('skip')).toBe(false)
++    expect(isControlTokenText('[]')).toBe(false)
++    expect(hasAssistantReplyContent([{ kind: 'text', text: '[skip]' }])).toBe(false)
++    // The token only suppresses itself: a real reply beside it still counts.
++    expect(hasAssistantReplyContent([
++      { kind: 'text', text: '[skip]' }, { kind: 'text', text: 'reviewed' },
++    ])).toBe(true)
++  })
++
+   it.each(['replay', 'live', 'prepend'] as const)('retains permission and Context data outside visible Chat order (%s)', (mode) => {
+     const entries = [
+       at(1, 'command/run', { commandId: 'permission-1', name: 'permission', source: { kind: 'user' } }),
+diff --git a/packages/client/ui-chat/tests/presentation-policy.client.spec.tsx b/packages/client/ui-chat/tests/presentation-policy.client.spec.tsx
+index dd0f2a9dd5..99cb1da732 100644
+--- a/packages/client/ui-chat/tests/presentation-policy.client.spec.tsx
++++ b/packages/client/ui-chat/tests/presentation-policy.client.spec.tsx
+@@ -16,7 +16,10 @@ describe('Chat presentation policy', () => {
+     ['verbose', false, 'none', true, false],
+   ] as const)('maps %s to stable presentation capabilities', (mode, foldCompletedTurns, stepGrouping, settledReasoningPreview, liveProcessDetail) => {
+     const policy = presentationPolicyFor(mode)
+-    expect(policy).toEqual({ mode, foldCompletedTurns, stepGrouping, settledReasoningPreview, liveProcessDetail })
++    expect(policy).toEqual({
++      mode, foldCompletedTurns, stepGrouping, settledReasoningPreview, liveProcessDetail,
++      hideReasoning: false, hideTurnProcess: false, hideTurnUsage: false, hideSessionStats: false,
++    })
+     expect(presentationPolicyFor(mode)).toBe(policy)
+   })
+ 
+diff --git a/packages/client/ui-chat/tests/turn-trigger.client.spec.tsx b/packages/client/ui-chat/tests/turn-trigger.client.spec.tsx
+index 3b0ac5596c..57079e8734 100644
+--- a/packages/client/ui-chat/tests/turn-trigger.client.spec.tsx
++++ b/packages/client/ui-chat/tests/turn-trigger.client.spec.tsx
+@@ -59,6 +59,55 @@ describe('Turn trigger notices', () => {
+     expect(node.data.source).toEqual({ kind: 'schedule' })
+   })
+ 
++  it('attributes a room delivery to the group chat that produced it', () => {
++    const node = trigger({
++      kind: 'room-message', roomId: 'r1', messageId: 'm1', roomName: '评审组', senderName: '测试助手',
++    })
++    expect(turnTriggerDetails(node.data)).toEqual({
++      title: 'message.trigger.roomNamed', icon: 'team', params: { room: '评审组' },
++    })
++    const view = render(<TurnTriggerNodeView node={node} t={makeTranslate(en)} />)
++    expect(view.getByRole('button').textContent).toContain('Message from group "评审组"')
++  })
++
++  it('keeps the unnamed room title for records written without a room name', () => {
++    const node = trigger({ kind: 'room-message', roomId: 'r1', messageId: 'm1', senderName: '测试助手' })
++    expect(turnTriggerDetails(node.data)).toEqual({ title: 'message.trigger.room', icon: 'team' })
++    const view = render(<TurnTriggerNodeView node={node} t={makeTranslate(en)} />)
++    expect(view.getByRole('button').textContent).toContain('Message from a group chat')
++  })
++
++  it('attributes a Bot handoff to the teammate that sent it', () => {
++    const node = trigger({ kind: 'bot-handoff', senderBotId: 'b1', senderName: '测试助手', depth: 1 })
++    expect(turnTriggerDetails(node.data)).toEqual({
++      title: 'message.trigger.handoff', icon: 'agent', params: { name: '测试助手' },
++    })
++    const view = render(<TurnTriggerNodeView node={node} t={makeTranslate(en)} />)
++    expect(view.getByRole('button').textContent).toContain('Task handed off by "测试助手"')
++  })
++
++  it('attributes a Bot consultation question to the teammate asking it', () => {
++    const node = trigger({
++      kind: 'bot-consult', senderBotId: 'b1', senderName: '测试助手', questionId: 'q1', round: 1,
++    })
++    expect(turnTriggerDetails(node.data)).toEqual({
++      title: 'message.trigger.consult', icon: 'agent', params: { name: '测试助手' },
++    })
++    const view = render(<TurnTriggerNodeView node={node} t={makeTranslate(en)} />)
++    expect(view.getByRole('button').textContent).toContain('Question from "测试助手"')
++  })
++
++  it('attributes a consult answer to the teammate that answered', () => {
++    const node = trigger({
++      kind: 'bot-consult-answer', senderBotId: 'b2', senderName: '代码审查员', questionId: 'q1', round: 1,
++    })
++    expect(turnTriggerDetails(node.data)).toEqual({
++      title: 'message.trigger.consultAnswer', icon: 'agent', params: { name: '代码审查员' },
++    })
++    const view = render(<TurnTriggerNodeView node={node} t={makeTranslate(zh)} />)
++    expect(view.getByRole('button').textContent).toContain('「代码审查员」回复了你的咨询')
++  })
++
+   it('opens the recorded notice body and closes it independently of the Turn', () => {
+     const view = render(<TurnTriggerNodeView node={trigger({ kind: 'schedule' })} t={makeTranslate(en)} />)
+     const button = view.getByRole('button')

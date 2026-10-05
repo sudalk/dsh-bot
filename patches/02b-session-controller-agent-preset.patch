@@ -1,0 +1,73 @@
+diff --git a/packages/api/session-controller/src/client/contract/sessions.ts b/packages/api/session-controller/src/client/contract/sessions.ts
+index 076188c1e0..9ccfa9c6bc 100644
+--- a/packages/api/session-controller/src/client/contract/sessions.ts
++++ b/packages/api/session-controller/src/client/contract/sessions.ts
+@@ -80,13 +80,14 @@ export interface ISessions {
+   readonly searchResultLimit: number
+   /**
+    * Create or adopt a Session on the Host.
+-   * @param opts - target workspace, directory, and optional preallocated identity.
++   * @param opts - target workspace, directory, preallocated identity, and optional Agent preset.
+    * @returns the catalogued identity; retain it before borrowing its binding.
+    */
+   create(opts?: {
+     workspaceId?: WorkspaceId
+     cwd?: string
+     sessionId?: SessionId
++    agentPreset?: string
+   }): Promise<SessionId>
+   /**
+    * Resolve an already discovered direct-parent address without opening it.
+diff --git a/packages/api/session-controller/src/client/sessions/manager.ts b/packages/api/session-controller/src/client/sessions/manager.ts
+index 50af09df13..d441a6d46f 100644
+--- a/packages/api/session-controller/src/client/sessions/manager.ts
++++ b/packages/api/session-controller/src/client/sessions/manager.ts
+@@ -482,7 +482,7 @@ export class SessionManager {
+    * Contract session.create; on success merge into summaries immediately (no
+    * wait for the next refresh). A created session is blank by definition
+    * (entity birth precedes the first message).
+-   * @param opts - target workspace or working directory, plus an optional caller-owned id.
++   * @param opts - target workspace or working directory, optional caller-owned id, and optional Agent preset.
+    * @returns the create result.
+   */
+   async create(
+@@ -490,12 +490,14 @@ export class SessionManager {
+       workspaceId?: WorkspaceId
+       cwd?: string
+       sessionId?: SessionId
++      agentPreset?: string
+     } = {},
+   ): Promise<RemoteResult<{ sessionId: SessionId }>> {
+     const shared = opts.sessionId === undefined ? {} : { sessionId: opts.sessionId }
++    const preset = opts.agentPreset === undefined ? {} : { agentPreset: opts.agentPreset }
+     const payload = opts.workspaceId !== undefined
+-      ? { workspaceId: opts.workspaceId, ...shared }
+-      : { ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }), ...shared }
++      ? { workspaceId: opts.workspaceId, ...shared, ...preset }
++      : { ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }), ...shared, ...preset }
+     const result = await this.remote.session.create(payload)
+     if (result.ok) {
+       this.recordMutation({ kind: 'placeholder', summary: { agentAvailable: true,
+diff --git a/packages/api/session-controller/src/client/sessions/service.ts b/packages/api/session-controller/src/client/sessions/service.ts
+index 8166b6f32d..40dc2d22bd 100644
+--- a/packages/api/session-controller/src/client/sessions/service.ts
++++ b/packages/api/session-controller/src/client/sessions/service.ts
+@@ -424,11 +424,16 @@ export class ClientSessions implements ISessions {
+   /**
+    * Create a Host Session and publish its catalog row before resolving.
+    * Callers retain the returned identity before borrowing its binding.
+-   * @param opts - target workspace or directory and an optional preallocated id.
++   * @param opts - target workspace or directory, optional preallocated id, and optional Agent preset.
+    * @returns the new session id.
+    * @throws {SessionCreateError} with the requested id.
+    */
+-  async create(opts: { workspaceId?: WorkspaceId; cwd?: string; sessionId?: SessionId } = {}): Promise<SessionId> {
++  async create(opts: {
++    workspaceId?: WorkspaceId
++    cwd?: string
++    sessionId?: SessionId
++    agentPreset?: string
++  } = {}): Promise<SessionId> {
+     const result = await this.manager.create(opts)
+     if (!result.ok) throw new SessionCreateError(result.error, opts.sessionId)
+     this.projectList()

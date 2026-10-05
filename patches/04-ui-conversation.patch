@@ -1,0 +1,101 @@
+diff --git a/packages/client/ui-conversation/src/client/contract/slots.ts b/packages/client/ui-conversation/src/client/contract/slots.ts
+index 61f7d8ff8b..a6b87a9557 100644
+--- a/packages/client/ui-conversation/src/client/contract/slots.ts
++++ b/packages/client/ui-conversation/src/client/contract/slots.ts
+@@ -364,6 +364,18 @@ export interface ComposerBarOwnerProps {
+   blocked?: { readonly reason: string }
+   /** Lock all message actions while preserving the resident composer surface. */
+   disabled?: boolean
++  /**
++   * Drop the work-mode controls (plan and permission chips) from the tool row.
++   * A presentation host that shows its conversation as chat sets this; the
++   * controls stay reachable through their commands.
++   */
++  hideModeControls?: boolean
++  /**
++   * Drop the context-occupancy meter under the input card. A presentation host
++   * that shows its conversation as chat sets this alongside
++   * {@link hideModeControls}: token telemetry is work-console chrome too.
++   */
++  hideContextMeter?: boolean
+   /** Whether the shared Workspace picker is expanded. */
+   workspacePickerOpen?: boolean
+   /** Open the Workspace picker from the inert composer surface. */
+@@ -460,6 +472,18 @@ export interface ConversationContentInputProps {
+   variant: 'main' | 'embedded'
+   phase: 'settling' | 'hero' | 'active'
+   hero: boolean
++  /**
++   * Drop the composer's work-mode controls (plan and permission chips). An
++   * occurrence presented as chat — a Bot chat — passes true; omitted keeps the
++   * full tool row for ordinary Sessions.
++   */
++  hideModeControls?: boolean
++  /**
++   * Drop the composer's context-occupancy meter. An occurrence presented as
++   * chat — a Bot chat — passes true; omitted keeps token telemetry for
++   * ordinary Sessions.
++   */
++  hideContextMeter?: boolean
+ }
+ 
+ /** Values passed from shared content to its occurrence-selected width controls. */
+diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationContent.tsx b/packages/client/ui-conversation/src/client/skeleton/ConversationContent.tsx
+index 15bfdd8732..7b83a355a9 100644
+--- a/packages/client/ui-conversation/src/client/skeleton/ConversationContent.tsx
++++ b/packages/client/ui-conversation/src/client/skeleton/ConversationContent.tsx
+@@ -145,6 +145,8 @@ export function ConversationContent(props: ConversationContentProps) {
+   const blocked = !inert && composerBlock !== undefined
+   const inputBar = renderSlot('conversation.composer.bar', {
+     variant: hero ? 'hero' : 'composer',
++    ...(props.hideModeControls === undefined ? {} : { hideModeControls: props.hideModeControls }),
++    ...(props.hideContextMeter === undefined ? {} : { hideContextMeter: props.hideContextMeter }),
+     ...(inert
+       ? {
+         disabled: true,
+diff --git a/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx b/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx
+index 2361d96c99..fab866ac37 100644
+--- a/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx
++++ b/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx
+@@ -47,8 +47,8 @@ export const InputBar = memo(function InputBar({
+   retryFileUpload,
+   toggleCommandMenu, stop, t,
+   renderSlot, useBusyEnter, useFileUploads, useNotices, useLexicon, useMenuLauncher, useStopShortcut,
+-  useProjection, sessionId, variant, disabled: inert = false, blocked,
+-  workspacePickerOpen = false, onRequestWorkspace,
++  useProjection, sessionId, variant, disabled: inert = false, blocked, hideModeControls = false,
++  hideContextMeter = false, workspacePickerOpen = false, onRequestWorkspace,
+   placeholder, accessory,
+ }: InputBarProps) {
+   const input = useInput(s => s)
+@@ -439,10 +439,15 @@ export const InputBar = memo(function InputBar({
+               hidden
+               onChange={onPickFiles}
+             />
+-            <div className={css.modes}>
+-              {sessionId === undefined ? null : renderSlot('conversation.input.permission', { locked })}
+-              {sessionId === undefined ? null : renderSlot('conversation.input.plan', { locked })}
+-            </div>
++            {/* The mode cluster is work-console chrome: a chat-presented
++                occurrence drops the whole seat, gap included, and the
++                controls stay reachable through their commands. */}
++            {!hideModeControls && (
++              <div className={css.modes}>
++                {sessionId === undefined ? null : renderSlot('conversation.input.permission', { locked })}
++                {sessionId === undefined ? null : renderSlot('conversation.input.plan', { locked })}
++              </div>
++            )}
+             {input === undefined || sessionId === undefined
+               ? null
+               : renderSlot('conversation.input.left', {})}
+@@ -500,7 +505,9 @@ export const InputBar = memo(function InputBar({
+         {variant === 'composer' && input !== undefined && sessionId !== undefined
+           ? renderSlot('conversation.composer.dock', {})
+           : null}
+-        {activity ? null : <ContextMeter useProjection={useProjection} t={t} />}
++        {/* Context occupancy is work-console telemetry: a chat-presented
++            occurrence drops it, like the mode cluster above. */}
++        {activity || hideContextMeter ? null : <ContextMeter useProjection={useProjection} t={t} />}
+       </div>
+     </div>
+   )

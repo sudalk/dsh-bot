@@ -1,0 +1,470 @@
+diff --git a/packages/client/ui-workspace/src/client/contract/slots.ts b/packages/client/ui-workspace/src/client/contract/slots.ts
+index 45f8564c8e..e56d941e30 100644
+--- a/packages/client/ui-workspace/src/client/contract/slots.ts
++++ b/packages/client/ui-workspace/src/client/contract/slots.ts
+@@ -223,6 +223,12 @@ export type WorkspaceBrowserInjected = {
+     hostInfo: HostObservable<RemoteHostFacts>
+     workspaceShortcuts: HostObservable<WorkspaceShortcutState>
+     shortcuts: HostObservable<readonly ShortcutCatalogEntry[]>
++    /**
++     * Sessions another surface presents (a Bot's own chat): every browser
++     * derivation omits them, so the surface that owns the conversation stays
++     * the only way in.
++     */
++    hiddenSessions: HostObservable<ReadonlySet<SessionId>>
+   }
+   /** Open the browser search and focus its input. */
+   requestSearch: () => void
+diff --git a/packages/client/ui-workspace/src/client/index.ts b/packages/client/ui-workspace/src/client/index.ts
+index 2ecaf7e264..bcdf762812 100644
+--- a/packages/client/ui-workspace/src/client/index.ts
++++ b/packages/client/ui-workspace/src/client/index.ts
+@@ -12,7 +12,10 @@
+  * `shell.overlay` (see the contract module doc). It also declares two
+  * Session-row seats: the leading decoration a row renders only while its own
+  * primary state is idle, and the section the row's hover card renders between
+- * its relative time and its trailing status line. Export discipline:
++ * its relative time and its trailing status line. The browser additionally
++ * consumes the optional session-visibility face (visibility.ts): a surface
++ * that presents its own conversations publishes their Sessions there, and
++ * every browser derivation omits them. Export discipline:
+  * packages/client/AGENTS.md.
+  */
+ import type {} from '@deepseek-ai/dsh-client-product-analytics/client'
+@@ -55,6 +58,7 @@ import { WorkspacePicker } from './WorkspacePicker.tsx'
+ import { en, zh, type WorkspaceKey } from './locales.ts'
+ 
+ export type { UiWorkspace } from './navigation.ts'
++export type { ISessionVisibility } from './visibility.ts'
+ export type {
+   DirectoryFlowOwnerProps, DirectoryFlowSlotName, DirectoryPickingHooks, DirectoryPickingInjected,
+   MenuOpenState, RowToast, SessionRenameTarget, SessionRowOwnerProps, UseMenuOpenState, WorkspaceBrowserInjected,
+@@ -85,6 +89,9 @@ declare module '@deepseek-ai/dsh-api-session-controller/client' {
+ /** Dictionary namespace owned by this plugin. */
+ const NS = 'workspace'
+ 
++/** Shared empty hidden set: one identity, so a browser with nothing hidden never reprojects. */
++const NO_HIDDEN_SESSIONS: ReadonlySet<SessionId> = new Set()
++
+ /**
+  * Required services (cordis fiber inject). The target slots are declared by
+  * the ui-sidebar / ui-conversation applies, whose activation order relative
+@@ -115,6 +122,27 @@ export function apply(ctx: Context): void {
+   const rowToast = createSnapshotStore<RowToastState | null>(null)
+   let toastSeq = 0
+   const notify = (toast: RowToast): void => { rowToast.set({ ...toast, seq: ++toastSeq }) }
++  // Sessions another surface presents (a Bot's own chat): every browser
++  // derivation reads this source, and it follows whichever surface provides
++  // the visibility face — wherever that surface loads relative to this one —
++  // falling back to none when the face leaves. One stable store keeps the
++  // hook binding's source identity fixed while membership moves.
++  const hiddenSessions = createSnapshotStore<ReadonlySet<SessionId>>(NO_HIDDEN_SESSIONS)
++  ctx.inject(['sessionVisibility'], (scope) => {
++    const source = scope.sessionVisibility.hidden
++    const sync = (): void => {
++      const next = source.getSnapshot()
++      const current = hiddenSessions.getSnapshot()
++      if (next.size === current.size && [...next].every(id => current.has(id))) return
++      hiddenSessions.set(next)
++    }
++    sync()
++    const unsubscribe = source.subscribe(sync)
++    scope.effect(() => () => {
++      unsubscribe()
++      hiddenSessions.set(NO_HIDDEN_SESSIONS)
++    })
++  })
+   const uiWorkspace = new UiWorkspaceService(
+     ctx, ctx.remote.directoryPicker, workspaces, sessions, viewInstance.actions, notify,
+   )
+@@ -249,7 +277,10 @@ export function apply(ctx: Context): void {
+     closeAddWorkspace: shortcutControls.closeAdd,
+     setDirectoryBusy: shortcutControls.directoryBusy,
+     dismissForkError: shortcutControls.dismissForkError,
+-    hooks: { directoryFlow: browserFlowSource, hostInfo, workspaceShortcuts: shortcutControls.state, shortcuts: ctx.shortcuts.catalog },
++    hooks: {
++      directoryFlow: browserFlowSource, hostInfo, hiddenSessions,
++      workspaceShortcuts: shortcutControls.state, shortcuts: ctx.shortcuts.catalog,
++    },
+   })
+   const pickerInjected = (): WorkspacePickerInjected => ({
+     createWorkspace: input => workspaces.create(input),
+diff --git a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
+index 3c900b2c6b..06279d98f0 100644
+--- a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
++++ b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
+@@ -34,7 +34,7 @@ import type { WorkspaceBrowserProps } from '../contract/slots.ts'
+ import type { ArchivedFilter, GroupNode, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
+ import {
+   deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
+-  pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY,
++  pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY, withoutHiddenSessions,
+ } from '../tree.ts'
+ import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
+ import { AnimatedRows } from './AnimatedRows.tsx'
+@@ -739,6 +739,7 @@ interface RemoteSearchState {
+ function SearchResults({
+   useSessions,
+   useSessionStatus,
++  useHiddenSessions,
+   open,
+   onUnarchive,
+   workspaces,
+@@ -749,7 +750,10 @@ function SearchResults({
+   resultLimit,
+   usePanelInfo,
+   t,
+-}: Pick<WorkspaceBrowserProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo'> & {
++}: Pick<
++  WorkspaceBrowserProps,
++  'useSessions' | 'useSessionStatus' | 'useHiddenSessions' | 'open' | 't' | 'usePanelInfo'
++> & {
+   workspaces: readonly WorkspaceView[]
+   archivedSessionIds: readonly SessionNode['id'][]
+   /** Search matches follow the archived filter selected for the list. */
+@@ -761,7 +765,11 @@ function SearchResults({
+   resultLimit: number
+ }) {
+   const panelActive = usePanelInfo(info => info.activePanelId !== null)
+-  const list = useSessions(s => s)
++  const sessions = useSessions(s => s)
++  const hiddenSessions = useHiddenSessions(s => s)
++  // Matches, the current row, and the domain rows all read one membership:
++  // another surface's conversations never surface as search results.
++  const list = useMemo(() => withoutHiddenSessions(sessions, hiddenSessions), [sessions, hiddenSessions])
+   const statuses = useSessionStatus(s => s)
+   const currentRemote = remote.query === query
+     ? remote
+@@ -855,6 +863,7 @@ export function WorkspaceBrowser({
+   searchResultLimit,
+   useDirectoryFlow,
+   useHostInfo,
++  useHiddenSessions,
+   useShortcuts,
+   useWorkspaceShortcuts,
+   requestSearch,
+@@ -872,6 +881,11 @@ export function WorkspaceBrowser({
+   const shortcutState = useWorkspaceShortcuts(state => state)
+   // Ordering remains live while the rail or search replaces the list body.
+   const list = useSessions(state => state)
++  // The Sessions this browser shows: another surface's conversations are
++  // projected out before every derivation below, so the grouped tree, the
++  // flat list, search, and the local orders all agree on one membership.
++  const hiddenSessions = useHiddenSessions(state => state)
++  const visibleList = useMemo(() => withoutHiddenSessions(list, hiddenSessions), [list, hiddenSessions])
+   const storedWorkspaces = useWorkspaces(state => state.items)
+   // The resolved name, not `t`, is the memo dependency: the bound seat keeps
+   // its identity across a language switch.
+@@ -908,15 +922,15 @@ export function WorkspaceBrowser({
+   }
+   const leaveArchivedOnly = (): void => { actions.setArchivedFilter('default') }
+   const workspaceReady = workspacePhase === 'ready' && workspaceStreamState !== 'loading'
+-  const mainSessionId = Object.values(list.byId)
++  const mainSessionId = Object.values(visibleList.byId)
+     .find(session => (session.retainedBy.mainView ?? 0) > 0)?.id
+-  const currentBlank = mainSessionId !== undefined && list.byId[mainSessionId]?.blank === true
++  const currentBlank = mainSessionId !== undefined && visibleList.byId[mainSessionId]?.blank === true
+     ? mainSessionId
+     : undefined
+   const ungroupedMemberIds = useMemo(() => {
+     const accounted = new Set(workspaces.flatMap(workspace => workspace.sessionIds))
+-    return list.ids.filter(id => list.byId[id] !== undefined && !accounted.has(id))
+-  }, [list, workspaces])
++    return visibleList.ids.filter(id => visibleList.byId[id] !== undefined && !accounted.has(id))
++  }, [visibleList, workspaces])
+   const orderState = useMemo(
+     () => ({ pinnedSessionIds, archivedSessionIds }),
+     [archivedSessionIds, pinnedSessionIds],
+@@ -925,12 +939,12 @@ export function WorkspaceBrowser({
+     () => ({ ...orderState, archivedFilter }),
+     [orderState, archivedFilter],
+   )
+-  const flatMemberIds = useMemo(() => sessionMemberIds(list), [list])
++  const flatMemberIds = useMemo(() => sessionMemberIds(visibleList), [visibleList])
+   const orderedWorkspaces = useMemo(() => workspaces.map((workspace) => {
+     const memberIds = workspace.sessionIds
+     const baseOrder = orderBy === 'updated'
+-      ? orderByRecency(memberIds, list.byId)
+-      : reconcileManualOrder(memberIds, sessionOrderByAccount[workspace.workspaceId], list.byId, orderState)
++      ? orderByRecency(memberIds, visibleList.byId)
++      : reconcileManualOrder(memberIds, sessionOrderByAccount[workspace.workspaceId], visibleList.byId, orderState)
+     return {
+       ...workspace,
+       sessionIds: pinCurrentBlank(
+@@ -938,25 +952,25 @@ export function WorkspaceBrowser({
+         currentBlank !== undefined && memberIds.includes(currentBlank) ? currentBlank : undefined,
+       ),
+     }
+-  }), [currentBlank, list.byId, orderBy, orderState, sessionOrderByAccount, workspaces])
++  }), [currentBlank, visibleList.byId, orderBy, orderState, sessionOrderByAccount, workspaces])
+   const orderedUngroupedSessionIds = useMemo(() => {
+     const baseOrder = orderBy === 'updated'
+-      ? orderByRecency(ungroupedMemberIds, list.byId)
+-      : reconcileManualOrder(ungroupedMemberIds, sessionOrderByAccount[UNGROUPED_KEY], list.byId, orderState)
++      ? orderByRecency(ungroupedMemberIds, visibleList.byId)
++      : reconcileManualOrder(ungroupedMemberIds, sessionOrderByAccount[UNGROUPED_KEY], visibleList.byId, orderState)
+     return pinCurrentBlank(
+       baseOrder,
+       currentBlank !== undefined && ungroupedMemberIds.includes(currentBlank) ? currentBlank : undefined,
+     )
+-  }, [currentBlank, list.byId, orderBy, orderState, sessionOrderByAccount, ungroupedMemberIds])
++  }, [currentBlank, visibleList.byId, orderBy, orderState, sessionOrderByAccount, ungroupedMemberIds])
+   const orderedFlatSessionIds = useMemo(() => {
+     const baseOrder = orderBy === 'updated'
+-      ? orderByRecency(flatMemberIds, list.byId)
+-      : reconcileManualOrder(flatMemberIds, sessionOrderByAccount[FLAT_SESSION_ORDER_KEY], list.byId, orderState)
++      ? orderByRecency(flatMemberIds, visibleList.byId)
++      : reconcileManualOrder(flatMemberIds, sessionOrderByAccount[FLAT_SESSION_ORDER_KEY], visibleList.byId, orderState)
+     return pinCurrentBlank(
+       baseOrder,
+       currentBlank !== undefined && flatMemberIds.includes(currentBlank) ? currentBlank : undefined,
+     )
+-  }, [currentBlank, flatMemberIds, list.byId, orderBy, orderState, sessionOrderByAccount])
++  }, [currentBlank, flatMemberIds, visibleList.byId, orderBy, orderState, sessionOrderByAccount])
+   const activeSessionOrders = useMemo<Readonly<Record<string, readonly SessionId[]>>>(() => Object.fromEntries([
+     ...orderedWorkspaces.map(workspace => [workspace.workspaceId, workspace.sessionIds] as const),
+     [UNGROUPED_KEY, orderedUngroupedSessionIds] as const,
+@@ -971,7 +985,7 @@ export function WorkspaceBrowser({
+     ])
+   }, [actions.retainAccountKeys, workspacePhase, workspaces])
+   useEffect(() => {
+-    if (list.phase !== 'ready' || workspaceReady || orderBy !== 'manual' || currentBlank === undefined) return
++    if (visibleList.phase !== 'ready' || workspaceReady || orderBy !== 'manual' || currentBlank === undefined) return
+     // A first prompt can end blank pinning before the Workspace baseline arrives.
+     // Preserve saved members until that baseline can establish departures.
+     const changed: Record<string, readonly string[]> = {}
+@@ -986,14 +1000,14 @@ export function WorkspaceBrowser({
+     actions.syncSessionOrders,
+     activeSessionOrders,
+     currentBlank,
+-    list.phase,
++    visibleList.phase,
+     orderBy,
+     sessionOrderByAccount,
+     workspacePhase,
+     workspaceReady,
+   ])
+   useEffect(() => {
+-    if (list.phase !== 'ready' || !workspaceReady || orderBy !== 'manual' || currentBlank === undefined) return
++    if (visibleList.phase !== 'ready' || !workspaceReady || orderBy !== 'manual' || currentBlank === undefined) return
+     const moved = Object.entries(activeSessionOrders).some(([key, ids]) =>
+       ids[0] === currentBlank && sessionOrderByAccount[key]?.[0] !== currentBlank)
+     if (moved) actions.syncSessionOrders(activeSessionOrders)
+@@ -1001,7 +1015,7 @@ export function WorkspaceBrowser({
+     actions.syncSessionOrders,
+     activeSessionOrders,
+     currentBlank,
+-    list.phase,
++    visibleList.phase,
+     orderBy,
+     sessionOrderByAccount,
+     workspaceReady,
+@@ -1347,6 +1361,7 @@ export function WorkspaceBrowser({
+               usePanelInfo={usePanelInfo}
+               useSessions={useSessions}
+               useSessionStatus={useSessionStatus}
++              useHiddenSessions={useHiddenSessions}
+               open={openSearchResult}
+               onUnarchive={onSessionUnarchive}
+               workspaces={workspaces}
+@@ -1362,7 +1377,7 @@ export function WorkspaceBrowser({
+             ? (
+               <FlatList
+                 usePanelInfo={usePanelInfo}
+-                list={list}
++                list={visibleList}
+                 sessionIds={orderedFlatSessionIds}
+                 rowState={rowState}
+                 onLeaveArchivedOnly={leaveArchivedOnly}
+@@ -1381,7 +1396,7 @@ export function WorkspaceBrowser({
+             : (
+               <SessionTree
+                 usePanelInfo={usePanelInfo}
+-                list={list}
++                list={visibleList}
+                 shortcuts={shortcuts}
+                 useSessionStatus={useSessionStatus}
+                 onSessionRenameRequest={requestSessionRename}
+diff --git a/packages/client/ui-workspace/src/client/tree.ts b/packages/client/ui-workspace/src/client/tree.ts
+index eb67d0ebe3..9e5b2e7b27 100644
+--- a/packages/client/ui-workspace/src/client/tree.ts
++++ b/packages/client/ui-workspace/src/client/tree.ts
+@@ -266,6 +266,40 @@ export interface SessionRowState {
+   archivedFilter: ArchivedFilter
+ }
+ 
++/**
++ * Project a list snapshot onto the Sessions the browser shows: Sessions
++ * another surface presents (a Bot's own chat) leave both membership and
++ * metadata. Every derivation resolves its members through the snapshot, so
++ * one projection hides them from the grouped tree, the flat list, and search
++ * alike. The snapshot identity is preserved when nothing is hidden, and a
++ * Workspace account still listing a projected-away Session renders no row for
++ * it (members without a summary are skipped, like a late list pull).
++ * @param list - authoritative list snapshot.
++ * @param hidden - Sessions the browser leaves to their presenting surface.
++ * @returns the same snapshot, or a membership/metadata copy without them.
++ */
++export function withoutHiddenSessions(
++  list: SessionListState,
++  hidden: ReadonlySet<SessionId>,
++): SessionListState {
++  if (hidden.size === 0) return list
++  let dropped = false
++  const ids = list.ids.filter((id) => {
++    if (!hidden.has(id)) return true
++    dropped = true
++    return false
++  })
++  const byId: Record<SessionId, SessionSummary> = {}
++  for (const [id, summary] of Object.entries(list.byId) as [SessionId, SessionSummary][]) {
++    if (hidden.has(id)) {
++      dropped = true
++      continue
++    }
++    byId[id] = summary
++  }
++  return dropped ? { ...list, ids, byId } : list
++}
++
+ /**
+  * Keep the visible New Session placeholder first, then partition pinned and
+  * ordinary rows without changing either partition's caller order.
+diff --git a/packages/client/ui-workspace/src/client/visibility.ts b/packages/client/ui-workspace/src/client/visibility.ts
+new file mode 100644
+index 0000000000..7fb17dd3bc
+--- /dev/null
++++ b/packages/client/ui-workspace/src/client/visibility.ts
+@@ -0,0 +1,28 @@
++/**
++ * Sessions another client surface presents itself, and the Workspace browser
++ * therefore leaves to that surface: a product that gives its conversations
++ * their own home — the Bot roster does, for each Bot's continuing chat —
++ * publishes them here, and the browser omits them from the grouped tree, the
++ * flat list, and search alike, so the owning surface stays the only way in.
++ * The face is optional: without it every Session shows.
++ * @module @deepseek-ai/dsh-client-ui-workspace/src/client/visibility
++ */
++import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
++import type { SessionId } from '@deepseek-ai/dsh-session/types'
++
++/** Face a client surface provides to keep its own conversations out of the browser. */
++export interface ISessionVisibility {
++  /**
++   * Sessions to omit. Membership is the contract, not identity: the set may be
++   * replaced whenever the presenting surface updates, and the browser
++   * republishes only when membership itself moves.
++   */
++  readonly hidden: ObservableSnapshot<ReadonlySet<SessionId>>
++}
++
++declare module '@deepseek-ai/cordis' {
++  interface Context {
++    /** Sessions another surface presents; absent without such a surface. */
++    sessionVisibility: ISessionVisibility
++  }
++}
+diff --git a/packages/client/ui-workspace/tests/tree.client.spec.ts b/packages/client/ui-workspace/tests/tree.client.spec.ts
+index 9fb549c5bd..d0160fba80 100644
+--- a/packages/client/ui-workspace/tests/tree.client.spec.ts
++++ b/packages/client/ui-workspace/tests/tree.client.spec.ts
+@@ -9,7 +9,8 @@ import type { SessionProjectionSnapshot } from '@deepseek-ai/dsh-api-session-con
+ import {
+   type ArchivedFilter,
+   deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
+-  pinCurrentBlank, reconcileManualOrder, sessionMemberIds, visibleSessionIds, workspaceLabel, UNGROUPED_KEY,
++  pinCurrentBlank, reconcileManualOrder, sessionMemberIds, visibleSessionIds, withoutHiddenSessions,
++  workspaceLabel, UNGROUPED_KEY,
+ } from '../src/client/tree.ts'
+ import { createWorkspaceViewStore } from '../src/client/stores.ts'
+ 
+@@ -850,6 +851,45 @@ describe('createWorkspaceViewStore', () => {
+   })
+ })
+ 
++describe('withoutHiddenSessions', () => {
++  it('keeps the snapshot identity when it names nothing listed', () => {
++    const sessions = list(summary('a', 2), summary('b', 1))
++    expect(withoutHiddenSessions(sessions, new Set())).toBe(sessions)
++    expect(withoutHiddenSessions(sessions, new Set([sid('other')]))).toBe(sessions)
++  })
++
++  it('drops named Sessions from membership, metadata, groups, and the flat list alike', () => {
++    const sessions = list(summary('kept', 3), summary('chat', 2), summary('loose', 1))
++    const visible = withoutHiddenSessions(sessions, new Set([sid('chat')]))
++    expect(visible.ids).toEqual([sid('kept'), sid('loose')])
++    expect(visible.byId[sid('chat')]).toBeUndefined()
++    // A Workspace still listing the projected-away Session renders no row for
++    // it, and its count follows the visible members.
++    const groups = deriveGroups(visible, [workspace('alpha', ['kept', 'chat'])], noRows, noAttention, view(['alpha']))
++    expect(groups[0]!.sessions.map(row => row.id)).toEqual([sid('kept')])
++    expect(groups[0]!.sessionCount).toBe(1)
++    const rows = deriveFlat(visible, [sid('kept'), sid('chat'), sid('loose')], noRows, noAttention)
++    expect(rows.map(row => row.id)).toEqual([sid('kept'), sid('loose')])
++  })
++
++  it('keeps a projected-away Session out of title matches and content hits', () => {
++    const chat = summary('chat', 1)
++    chat.title = chat.displayTitle = 'Needle chat'
++    const visible = withoutHiddenSessions(list(summary('kept', 2), chat), new Set([chat.id]))
++    const result = deriveSearchResults(
++      visible,
++      [],
++      'needle',
++      noArchive,
++      'default',
++      noAttention,
++      { items: [{ sessionId: chat.id, snippet: 'needle body' }], hasMore: false },
++      10,
++    )
++    expect(result.items).toEqual([])
++  })
++})
++
+ describe('workspaceLabel', () => {
+   it('uses the Ungrouped fallback and extracts POSIX and Windows basenames', () => {
+     expect(workspaceLabel(undefined)).toBe('')
+diff --git a/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx b/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx
+index f3ee447c1c..1b913dacbb 100644
+--- a/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx
++++ b/packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx
+@@ -79,6 +79,7 @@ const workspaceState = (
+   error: null,
+ })
+ const noPendingInteraction: SessionStatusSnapshot = new Map()
++const noHidden: ReadonlySet<SessionId> = new Set()
+ function hook<T>(snapshot: T) {
+   return function select<S>(selector: (state: T) => S): S { return selector(snapshot) }
+ }
+@@ -136,6 +137,7 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
+     createWorkspace: vi.fn(async () => workspace('created', [])),
+     useDirectoryFlow: bindSnapshotSelector({ getSnapshot: () => true, subscribe: () => () => {} }),
+     useHostInfo: selector => selector({ home: undefined, isLoopback: true }),
++    useHiddenSessions: hook(noHidden),
+     renderSlot: renderDirectoryFlowOnly,
+     t,
+     ...overrides,
+@@ -1079,6 +1081,23 @@ describe('WorkspaceBrowser', () => {
+     expect(screen.getAllByRole('treeitem').slice(1)[0]?.textContent).toContain('two')
+   })
+ 
++  it('leaves a Session another surface presents out of the grouped and flat lists', () => {
++    mount({
++      useSessions: hook(sessionState([summary('kept-s', 2), summary('bot-s', 1)])),
++      useWorkspaces: hook(workspaceState([workspace('alpha', ['kept-s', 'bot-s'])])),
++      useHiddenSessions: hook(new Set([sid('bot-s')])),
++    })
++    fireEvent.click(screen.getByText('alpha'))
++    expect(screen.getByText('kept-s')).toBeTruthy()
++    expect(screen.queryByText('bot-s')).toBeNull()
++
++    // The flat list reads the same projected membership.
++    fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
++    fireEvent.click(screen.getByRole('menuitem', { name: '单列表' }))
++    expect(screen.getByText('kept-s')).toBeTruthy()
++    expect(screen.queryByText('bot-s')).toBeNull()
++  })
++
+   it('hides archived rows in both modes once the archive set carries them', () => {
+     const b = mount({
+       useSessions: hook(sessionState([summary('kept-s', 2), summary('gone-s', 1)])),

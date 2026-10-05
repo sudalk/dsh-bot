@@ -1,0 +1,104 @@
+diff --git a/apps/cli/package.json b/apps/cli/package.json
+index 32a6fa67d1..e47d0623b4 100644
+--- a/apps/cli/package.json
++++ b/apps/cli/package.json
+@@ -30,6 +30,7 @@
+     "@deepseek-ai/dsh-agent-tool-presentation": "workspace:*",
+     "@deepseek-ai/dsh-app-boot": "workspace:*",
+     "@deepseek-ai/dsh-base": "workspace:*",
++    "@deepseek-ai/dsh-bot-profile": "workspace:*",
+     "@deepseek-ai/dsh-client-ui-agent-preset": "workspace:*",
+     "@deepseek-ai/dsh-client-ui-cordis": "workspace:*",
+     "@deepseek-ai/dsh-cmdline": "workspace:*",
+diff --git a/packages/boot/app-boot/src/profile.ts b/packages/boot/app-boot/src/profile.ts
+index e17e125a75..620c3eefa4 100644
+--- a/packages/boot/app-boot/src/profile.ts
++++ b/packages/boot/app-boot/src/profile.ts
+@@ -211,6 +211,7 @@ export const DEFAULT_PROFILE_BUNDLES: readonly string[] = ['@deepseek-ai/dsh-bas
+  * [admission](../../../../.agents/notes/implemented/architecture/2026-09-21-experimental-capabilities-as-optional-bundles.md)).
+  */
+ export const OPTIONAL_BUNDLES: readonly string[] = [
++  '@deepseek-ai/dsh-bot-profile',
+   '@deepseek-ai/dsh-experimental-agent-team-profile',
+   '@deepseek-ai/dsh-experimental-voice-input-bundle',
+   '@deepseek-ai/dsh-experimental-auto-review',
+diff --git a/tsconfig.base.json b/tsconfig.base.json
+index 52c4822158..7edf125e18 100644
+--- a/tsconfig.base.json
++++ b/tsconfig.base.json
+@@ -91,6 +91,9 @@
+       "@deepseek-ai/dsh-subprocess/control": ["./packages/subprocess/subprocess/src/control.ts"],
+       "@deepseek-ai/dsh-typert-registry": ["./packages/typert/registry/src/index.ts"],
+       "@deepseek-ai/dsh-typert-registry/client": ["./packages/typert/registry/src/client/index.ts"],
++      "@deepseek-ai/dsh-api-bot-controller": ["./packages/api/bot-controller/src/index.ts"],
++      "@deepseek-ai/dsh-api-bot-controller/client": ["./packages/api/bot-controller/src/client/index.ts"],
++      "@deepseek-ai/dsh-api-bot-controller/types": ["./packages/api/bot-controller/src/types.ts"],
+       "@deepseek-ai/dsh-api-gateway": ["./packages/api/gateway/src/index.ts"],
+       "@deepseek-ai/dsh-api-gateway/client": ["./packages/api/gateway/src/client/index.ts"],
+       "@deepseek-ai/dsh-api-gateway/types": ["./packages/api/gateway/src/types.ts"],
+@@ -259,6 +262,8 @@
+       "@deepseek-ai/dsh-client-ui-brand-official": ["./packages/client/ui-brand-official/src"],
+       "@deepseek-ai/dsh-client-ui-approval": ["./packages/client/ui-approval/src"],
+       "@deepseek-ai/dsh-client-ui-approval/client": ["./packages/client/ui-approval/src/client/index.ts"],
++      "@deepseek-ai/dsh-client-ui-bot": ["./packages/client/ui-bot/src"],
++      "@deepseek-ai/dsh-client-ui-bot/client": ["./packages/client/ui-bot/src/client/index.ts"],
+       "@deepseek-ai/dsh-client-ui-chat": ["./packages/client/ui-chat/src"],
+       "@deepseek-ai/dsh-client-ui-chat/client": ["./packages/client/ui-chat/src/client/index.ts"],
+       "@deepseek-ai/dsh-client-ui-conversation": ["./packages/client/ui-conversation/src"],
+@@ -337,6 +342,10 @@
+       "@deepseek-ai/dsh-compaction-image-offload/projection": ["./packages/compaction/compaction-image-offload/src/projection.ts"],
+       "@deepseek-ai/dsh-session-format-catalog/message-projections": ["./packages/session/session-format-catalog/src/message-projections.ts"],
+       "@deepseek-ai/dsh-native-command/types": ["./packages/util/native-command/src/types.ts"],
++      // The generated aliases map a package's bare name and `/invariant` only; the Bot Remote
++      // vocabulary imports `/types` directly, so these two subpaths stay hand-written.
++      "@deepseek-ai/dsh-bot/types": ["./packages/bot/bot/src/types.ts"],
++      "@deepseek-ai/dsh-bot-room/types": ["./packages/bot/bot-room/src/types.ts"],
+       // BEGIN generated package aliases — pnpm run gen-tsconfig-paths
+       "@deepseek-ai/dsh-acp": ["./packages/acp/acp/src"],
+       "@deepseek-ai/dsh-acp-app": ["./packages/bundle/acp-app/src"],
+@@ -359,6 +368,10 @@
+       "@deepseek-ai/dsh-base": ["./packages/bundle/base/src"],
+       "@deepseek-ai/dsh-bash-local": ["./packages/shell/bash-local/src"],
+       "@deepseek-ai/dsh-bash-sandbox": ["./packages/shell/bash-sandbox/src"],
++      "@deepseek-ai/dsh-bot": ["./packages/bot/bot/src"],
++      "@deepseek-ai/dsh-bot/invariant": ["./packages/bot/bot/src/invariant.ts"],
++      "@deepseek-ai/dsh-bot-profile": ["./packages/bot/bot-profile/src"],
++      "@deepseek-ai/dsh-bot-room": ["./packages/bot/bot-room/src"],
+       "@deepseek-ai/dsh-brand": ["./packages/util/brand/src"],
+       "@deepseek-ai/dsh-chunked-list": ["./packages/util/chunked-list/src"],
+       "@deepseek-ai/dsh-cmdline": ["./packages/boot/cmdline/src"],
+diff --git a/tsconfig.client.json b/tsconfig.client.json
+index 738ed0c5b4..0e32f299c7 100644
+--- a/tsconfig.client.json
++++ b/tsconfig.client.json
+@@ -82,6 +82,7 @@
+     { "path": "./packages/api/session-controller/tsconfig.client.json" },
+     { "path": "./packages/api/workspace-controller/tsconfig.client.json" },
+     { "path": "./packages/api/remotes/tsconfig.client.json" },
++    { "path": "./packages/api/bot-controller/tsconfig.client.json" },
+     { "path": "./packages/extensions/cordis-client-runner" },
+     { "path": "./packages/extensions/ui-cordis" },
+     { "path": "./packages/test-support/client-runtime" },
+@@ -93,6 +94,7 @@
+     { "path": "./packages/client/ui-brand-official" },
+     { "path": "./packages/client/ui-approval" },
+     { "path": "./packages/client/ui-chat/tsconfig.client.json" },
++    { "path": "./packages/client/ui-bot" },
+     { "path": "./packages/client/ui-conversation/tsconfig.client.json" },
+     { "path": "./packages/client/ui-tool" },
+     { "path": "./packages/client/ui-deliverables/tsconfig.client.json" },
+diff --git a/tsconfig.host.json b/tsconfig.host.json
+index 3942b72b1b..3531999775 100644
+--- a/tsconfig.host.json
++++ b/tsconfig.host.json
+@@ -310,6 +310,10 @@
+     { "path": "./packages/storage/storage-domain" },
+     { "path": "./packages/feedback/message-feedback" },
+     { "path": "./packages/workspace/workspace" },
++    { "path": "./packages/bot/bot" },
++    { "path": "./packages/bot/bot-profile" },
++    { "path": "./packages/bot/bot-room" },
++    { "path": "./packages/api/bot-controller/tsconfig.host.json" },
+     { "path": "./packages/session/session-title" },
+     { "path": "./packages/session/session-title-llm" },
+     { "path": "./packages/session/session-title-first-prompt-llm" },

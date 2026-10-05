@@ -1,0 +1,70 @@
+diff --git a/packages/api/remotes/package.json b/packages/api/remotes/package.json
+index d8ff08519a..7b2eb79898 100644
+--- a/packages/api/remotes/package.json
++++ b/packages/api/remotes/package.json
+@@ -66,6 +66,7 @@
+     "@deepseek-ai/dsh-api-session-controller": "workspace:*",
+     "@deepseek-ai/dsh-api-settings-controller": "workspace:*",
+     "@deepseek-ai/dsh-api-workspace-controller": "workspace:*",
++    "@deepseek-ai/dsh-api-bot-controller": "workspace:*",
+     "@deepseek-ai/dsh-api-workspace-files": "workspace:*",
+     "@deepseek-ai/dsh-client-connection": "workspace:*",
+     "@deepseek-ai/dsh-client-file-upload": "workspace:*",
+diff --git a/packages/api/remotes/src/client/index.ts b/packages/api/remotes/src/client/index.ts
+index 535d7a5243..a7f14c71e7 100644
+--- a/packages/api/remotes/src/client/index.ts
++++ b/packages/api/remotes/src/client/index.ts
+@@ -24,6 +24,7 @@ import subagentsRemote from '@deepseek-ai/dsh-subagent/remote'
+ import sessionRemote from '@deepseek-ai/dsh-api-session-controller/remote'
+ import jobRemote from '@deepseek-ai/dsh-api-job-controller/remote'
+ import workspaceRemote from '@deepseek-ai/dsh-api-workspace-controller/remote'
++import botRemote from '@deepseek-ai/dsh-api-bot-controller/remote'
+ import terminalRemote from '@deepseek-ai/dsh-api-terminal-controller/remote'
+ import workspaceFilesRemote from '@deepseek-ai/dsh-api-workspace-files/remote'
+ import type { ClientRemote } from '@deepseek-ai/dsh-api-gateway/client'
+@@ -60,6 +61,8 @@ export type {} from '@deepseek-ai/dsh-api-job-controller/remote'
+ export type * from '@deepseek-ai/dsh-api-job-controller/types'
+ export type {} from '@deepseek-ai/dsh-api-workspace-controller/remote'
+ export type * from '@deepseek-ai/dsh-api-workspace-controller/types'
++export type {} from '@deepseek-ai/dsh-api-bot-controller/remote'
++export type * from '@deepseek-ai/dsh-api-bot-controller/types'
+ export type {} from '@deepseek-ai/dsh-api-workspace-files/remote'
+ export type * from '@deepseek-ai/dsh-api-workspace-files/types'
+ export type {} from '@deepseek-ai/dsh-api-terminal-controller/remote'
+@@ -181,7 +184,7 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
+       goalsRemote, llmRemote, dynamicRemote, scheduleRemote,
+       pluginInventoryRemote, pluginManagerRemote, pluginRegistryProbeRemote, messageFeedbackRemote, sessionFeedbackRemote,
+       fileUploadsRemote, sessionReferencesRemote,
+-      permissionPresetsRemote, subagentsRemote, sessionRemote, jobRemote, workspaceRemote, workspaceFilesRemote, terminalRemote,
++      permissionPresetsRemote, subagentsRemote, sessionRemote, jobRemote, workspaceRemote, botRemote, workspaceFilesRemote, terminalRemote,
+       officeToPdfRemote,
+     ]) {
+       disposers.push(await ctx.remote.$mount(contribution))
+diff --git a/packages/api/remotes/tsconfig.client.json b/packages/api/remotes/tsconfig.client.json
+index 279c07025f..27ed962861 100644
+--- a/packages/api/remotes/tsconfig.client.json
++++ b/packages/api/remotes/tsconfig.client.json
+@@ -87,6 +87,9 @@
+     {
+       "path": "../workspace-controller/tsconfig.client.json"
+     },
++    {
++      "path": "../bot-controller/tsconfig.client.json"
++    },
+     {
+       "path": "../../typert/protocol"
+     },
+diff --git a/packages/api/remotes/tsconfig.host.json b/packages/api/remotes/tsconfig.host.json
+index 5a93826f6d..20bfc5da87 100644
+--- a/packages/api/remotes/tsconfig.host.json
++++ b/packages/api/remotes/tsconfig.host.json
+@@ -71,6 +71,9 @@
+     {
+       "path": "../workspace-controller/tsconfig.host.json"
+     },
++    {
++      "path": "../bot-controller/tsconfig.host.json"
++    },
+     {
+       "path": "../../typert/protocol"
+     },
