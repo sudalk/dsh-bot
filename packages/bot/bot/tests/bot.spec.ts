@@ -22,7 +22,11 @@ import type { BotProfile } from '../src/index.ts'
 const HOME = WorkspaceId('ws-home')
 
 /** Boot only the storage side so a caller can control what the registry sees. */
-async function storageContext(pool: MemoryMediaPool, agents: unknown = { get: () => undefined }) {
+async function storageContext(
+  pool: MemoryMediaPool,
+  agents: unknown = { get: () => undefined },
+  sessionController?: unknown,
+) {
   const ctx = new Context()
   await ctx.plugin(Storage)
   ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
@@ -34,9 +38,9 @@ async function storageContext(pool: MemoryMediaPool, agents: unknown = { get: ()
   // would fail loud if one did; conversation coverage lives with the room
   // router and the end-to-end runs.
   ctx.provide('agents', agents as never)
-  ctx.provide('sessionController', {
+  ctx.provide('sessionController', (sessionController ?? {
     create: async () => { throw new Error('bot test: conversation opening is not part of these cases') },
-  } as never)
+  }) as never)
   return ctx
 }
 
@@ -163,6 +167,36 @@ describe('BotRegistry', () => {
     const { registry } = await harness([])
     await expect(registry.create(profile())).rejects.toBeInstanceOf(BotUnknownWorkspaceError)
     expect(registry.list()).toEqual([])
+  })
+
+  it('creates a pure chat Bot without a workspace and homes it later', async () => {
+    const { registry } = await harness()
+    const bot = await registry.create(profile({ workspaceId: undefined }))
+
+    expect(bot.workspaceId).toBeUndefined()
+    expect(registry.list().map(entry => entry.name)).toEqual(['Researcher'])
+
+    await registry.update(bot.id, { workspaceId: HOME })
+    expect(bot.workspaceId).toBe(HOME)
+  })
+
+  it('opens a pure chat Bot conversation without naming a workspace', async () => {
+    const pool = new MemoryMediaPool()
+    const creates: { agentPreset?: string, workspaceId?: WorkspaceId }[] = []
+    const ctx = await storageContext(pool, undefined, {
+      create: async (request: unknown) => {
+        creates.push(request as { agentPreset?: string, workspaceId?: WorkspaceId })
+        return { sessionId: 'session-pure' }
+      },
+    })
+    ctx.provide('workspaceRegistry', { get: () => ({ id: HOME }) } as never)
+    await ctx.plugin(BotRegistry)
+    const bot = await ctx.bots.create(profile({ workspaceId: undefined }))
+    expect(creates).toEqual([])
+
+    expect(String(await bot.ensureConversation())).toBe('session-pure')
+    expect(creates).toEqual([{ agentPreset: 'default' }])
+    expect(String(bot.conversationId)).toBe('session-pure')
   })
 
   it('updates mutable fields, stamps updatedAt, and leaves a no-op unwritten', async () => {

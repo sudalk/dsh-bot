@@ -28,8 +28,9 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
  * rule carrier — standing responsibilities, working style, and approval
  * boundaries belong here, not in a conversation. `preset` names the agent
  * preset every conversation with this Bot is composed from, and
- * `workspaceId` names the existing workspace whose directory is the Bot's
- * home; the Bot owns no directory of its own.
+ * `workspaceId` optionally names the existing workspace whose directory is
+ * the Bot's home; a Bot without one is a pure chat teammate running from
+ * the deployment's default directory.
  */
 export interface BotProfile {
   /** Display name. Duplicates across Bots are allowed; identity is {@link BotId}. */
@@ -56,17 +57,22 @@ export interface BotProfile {
    * is refused at application time and leaves the deployment default in place.
    */
   readonly permission?: string | undefined
-  /** Existing workspace whose directory is this Bot's home. */
-  readonly workspaceId: WorkspaceId
+  /**
+   * Existing workspace whose directory is this Bot's home, or `undefined`
+   * for a pure chat Bot: the Bot owns no directory of its own, and its
+   * conversations then run from the deployment's default directory.
+   */
+  readonly workspaceId?: WorkspaceId | undefined
 }
 
 /** Fields a caller may change after creation; identity and creation instant never change. */
 export type BotProfileUpdate = Partial<BotProfile>
 
 /**
- * Durable identity of one Bot: a named teammate over an existing workspace,
- * with the profile that shapes every conversation it holds. Consumers only
- * see this interface; the implementation stays package-private.
+ * Durable identity of one Bot: a named teammate with an optional home
+ * workspace, and the profile that shapes every conversation it holds.
+ * Consumers only see this interface; the implementation stays
+ * package-private.
  */
 export interface Bot {
   /** Stable record id (generated uuid). */
@@ -87,8 +93,8 @@ export interface Bot {
   /** Permission preset this Bot's conversations run under, or `undefined` to follow the deployment default. */
   readonly permission: string | undefined
 
-  /** Existing workspace whose directory is this Bot's home. */
-  readonly workspaceId: WorkspaceId
+  /** Home workspace, or `undefined` for a pure chat Bot. */
+  readonly workspaceId: WorkspaceId | undefined
 
   /**
    * The Bot's continuing conversation, created and adopted on first open.

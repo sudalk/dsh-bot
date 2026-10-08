@@ -46,7 +46,8 @@ export interface BotManagerInjected {
     readonly preset: string
     /** Permission preset to pin from creation; omitted follows the deployment default. */
     readonly permission?: string
-    readonly workspaceId: WorkspaceId
+    /** Home workspace; omitted creates a pure chat Bot without one. */
+    readonly workspaceId?: WorkspaceId
   }): Promise<BotView>
   /** Load the permission presets a Bot may pin; the empty list hides the control.
    * @returns the advertised presets, in catalog order.
@@ -158,9 +159,24 @@ export function BotManagerPage(props: BotManagerPageProps): React.ReactNode {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [preset, setPreset] = useState('standard')
-  const [workspaceId, setWorkspaceId] = useState<WorkspaceId | undefined>(workspaces[0]?.workspaceId)
+  // No workspace by default: a new Bot is a pure chat teammate unless the
+  // creator gives it a home workspace.
+  const [workspaceId, setWorkspaceId] = useState<WorkspaceId | undefined>(undefined)
+  const [permission, setPermission] = useState('')
+  const [permissionOptions, setPermissionOptions] = useState<readonly PresetOption[] | undefined>(undefined)
   const [failed, setFailed] = useState(false)
   const [selected, setSelected] = useState<BotId[]>([])
+
+  useEffect(() => {
+    let live = true
+    void loadPermissionOptions().then(
+      (list) => { if (live) setPermissionOptions(list) },
+      // A failed catalog stays silent here: creation follows the deployment
+      // default, and the info drawer reports its own load failure.
+      () => { if (live) setPermissionOptions([]) },
+    )
+    return () => { live = false }
+  }, [loadPermissionOptions])
 
   const activeBot = selection.kind === 'bot'
     ? snapshot.bots.find(bot => String(bot.botId) === String(selection.botId))
@@ -319,7 +335,11 @@ export function BotManagerPage(props: BotManagerPageProps): React.ReactNode {
                         <div className={css.meta}>
                           <span className={css.metaItem}>{bot.preset}</span>
                           <span className={css.metaDivider}>·</span>
-                          <span className={css.metaItem}>{workspace?.title ?? String(bot.workspaceId)}</span>
+                          <span className={css.metaItem}>
+                            {bot.workspaceId === undefined
+                              ? t('workspaceNone')
+                              : (workspace?.title ?? String(bot.workspaceId))}
+                          </span>
                           {/* An armed teammate says so on the roster: the pin changes what the Bot may do unattended. */}
                           {bot.permission !== undefined && (
                             <>
@@ -340,7 +360,13 @@ export function BotManagerPage(props: BotManagerPageProps): React.ReactNode {
             className={css.form}
             onSubmit={(event) => {
               event.preventDefault()
-              if (workspaceId !== undefined) run(() => create({ name, description, preset, workspaceId }))
+              run(() => create({
+                name,
+                description,
+                preset,
+                ...permission === '' ? {} : { permission },
+                ...workspaceId === undefined ? {} : { workspaceId },
+              }))
             }}
           >
             <div className={css.formHead}>
@@ -374,10 +400,10 @@ export function BotManagerPage(props: BotManagerPageProps): React.ReactNode {
                   value={workspaceId === undefined ? '' : String(workspaceId)}
                   onChange={(event) => {
                     const next = workspaces.find(workspace => String(workspace.workspaceId) === event.target.value)
-                    if (next !== undefined) setWorkspaceId(next.workspaceId)
+                    setWorkspaceId(next?.workspaceId)
                   }}
-                  required
                 >
+                  <option value="">{t('workspaceNone')}</option>
                   {workspaces.map(workspace => (
                     <option key={String(workspace.workspaceId)} value={workspace.workspaceId}>
                       {workspace.title}
@@ -385,13 +411,29 @@ export function BotManagerPage(props: BotManagerPageProps): React.ReactNode {
                   ))}
                 </select>
               </label>
+              {permissionOptions !== undefined && permissionOptions.length > 0 && (
+                <label className={css.field}>
+                  <span>{t('permission')}</span>
+                  <select
+                    className={css.select}
+                    value={permission}
+                    onChange={(event) => { setPermission(event.target.value) }}
+                  >
+                    <option value="">{t('permissionFollow')}</option>
+                    {permissionOptions.map(option => (
+                      <option key={option.value} value={option.value}>
+                        {permissionLabel(option.value, permissionOptions, t)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
             <Button
               type="submit"
               variant="primary"
               className={css.createButton}
               icon={<IconPlusOutlineRegular size={14} />}
-              disabled={workspaceId === undefined}
             >
               {t('create')}
             </Button>

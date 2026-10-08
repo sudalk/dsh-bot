@@ -272,22 +272,25 @@ export class BotRegistry extends Service {
   }
 
   /**
-   * Create one durable Bot. The name, description, preset, and workspace are
-   * validated first; the workspace must already be registered so the Bot
-   * never points at a directory the product does not track. A newly created
-   * Bot is prepended to the durable roster order.
-   * @param profile - Complete identity, rules, preset, and home workspace.
+   * Create one durable Bot. The name, description, and preset are validated
+   * first; a supplied workspace must already be registered so the Bot never
+   * points at a directory the product does not track, while an omitted
+   * workspace leaves a pure chat Bot. A newly created Bot is prepended to
+   * the durable roster order.
+   * @param profile - Complete identity, rules, preset, and optional home workspace.
    * @returns the newly durable Bot.
    * @throws BotProfileInvalidError when a field fails validation.
-   * @throws BotUnknownWorkspaceError when the named workspace is unregistered.
+   * @throws BotUnknownWorkspaceError when a named workspace is unregistered.
    */
   create(profile: BotProfile): Promise<Bot> {
     const validation = validateBotProfile(profile)
     if (!validation.ok) throw new BotProfileInvalidError(validation.reason)
     return this.enqueueOperation(async () => {
-      const workspaces = this.ctx.get('workspaceRegistry')
-      if (workspaces?.get(profile.workspaceId) === undefined) {
-        throw new BotUnknownWorkspaceError(String(profile.workspaceId))
+      if (profile.workspaceId !== undefined) {
+        const workspaces = this.ctx.get('workspaceRegistry')
+        if (workspaces?.get(profile.workspaceId) === undefined) {
+          throw new BotUnknownWorkspaceError(String(profile.workspaceId))
+        }
       }
 
       const id = BotId(randomUUID())
@@ -298,7 +301,7 @@ export class BotRegistry extends Service {
         preset: profile.preset,
         ...profile.avatar === undefined || profile.avatar === '' ? {} : { avatar: profile.avatar },
         ...profile.permission === undefined || profile.permission === '' ? {} : { permission: profile.permission },
-        workspaceId: profile.workspaceId,
+        ...profile.workspaceId === undefined ? {} : { workspaceId: profile.workspaceId },
         createdAt: now,
         updatedAt: now,
       }
@@ -565,7 +568,9 @@ export class BotRegistry extends Service {
       return existing
     }
     const created = await this.ctx.sessionController.create({
-      workspaceId: bot.workspaceId,
+      // A pure chat Bot names no workspace: the Session composes from the
+      // deployment's default directory instead of a tracked one.
+      ...bot.workspaceId === undefined ? {} : { workspaceId: bot.workspaceId },
       agentPreset: bot.preset,
     })
     const sessionId = await bot.adoptConversation(created.sessionId)

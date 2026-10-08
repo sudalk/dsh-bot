@@ -370,7 +370,7 @@ function recordView(botId: BotId, bot: {
   readonly preset: string
   readonly avatar?: string | undefined
   readonly permission?: string | undefined
-  readonly workspaceId: BotView['workspaceId']
+  readonly workspaceId?: BotView['workspaceId']
   readonly conversationId?: SessionId | undefined
   readonly createdAt: string
   readonly updatedAt: string
@@ -382,7 +382,7 @@ function recordView(botId: BotId, bot: {
     preset: bot.preset,
     ...bot.avatar === undefined ? {} : { avatar: bot.avatar },
     ...bot.permission === undefined ? {} : { permission: bot.permission },
-    workspaceId: bot.workspaceId,
+    ...bot.workspaceId === undefined ? {} : { workspaceId: bot.workspaceId },
     ...bot.conversationId === undefined ? {} : { conversationId: bot.conversationId },
     createdAt: bot.createdAt,
     updatedAt: bot.updatedAt,

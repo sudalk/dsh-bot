@@ -22,8 +22,8 @@ export interface BotView {
   readonly avatar?: string
   /** Permission preset this Bot's conversations run under; absent follows the deployment default. */
   readonly permission?: string
-  /** Workspace whose directory is the Bot home. */
-  readonly workspaceId: WorkspaceId
+  /** Workspace whose directory is the Bot home; absent for a pure chat Bot. */
+  readonly workspaceId?: WorkspaceId
   /** The Bot's continuing conversation; absent until the first chat opens it. */
   readonly conversationId?: SessionId
   /** ISO-8601 creation instant. */
@@ -39,7 +39,8 @@ export interface BotCreateRequest {
   readonly preset: string
   /** Permission preset this Bot's conversations run under; omitted follows the deployment default. */
   readonly permission?: string
-  readonly workspaceId: WorkspaceId
+  /** Home workspace; omitted creates a pure chat Bot without one. */
+  readonly workspaceId?: WorkspaceId
 }
 
 /** Created Bot result. */

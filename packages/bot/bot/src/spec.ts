@@ -42,7 +42,11 @@ export const botRecord = z.object({
    * never persisted.
    */
   permission: z.string().optional(),
-  workspaceId,
+  /**
+   * Home workspace; absent on pure chat Bots, whose conversations run from
+   * the deployment's default directory instead of a tracked one.
+   */
+  workspaceId: workspaceId.optional(),
   /**
    * The Bot's one continuing conversation. Absent on records written before
    * conversations were part of the record; the consumer creates and adopts
